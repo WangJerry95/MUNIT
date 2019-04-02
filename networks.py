@@ -31,6 +31,9 @@ class MsImageDis(nn.Module):
         self.cnns = nn.ModuleList()
         for _ in range(self.num_scales):
             self.cnns.append(self._make_net())
+        self.FCs = nn.ModuleList()
+        self.FCs.append(LinearBlock(336, 128))
+        self.FCs.append(LinearBlock(128, 4, activation='none'))
 
     def _make_net(self):
         dim = self.dim
@@ -43,34 +46,53 @@ class MsImageDis(nn.Module):
         cnn_x = nn.Sequential(*cnn_x)
         return cnn_x
 
-    def forward(self, x):
+    def forward(self, x, classsification=False):
         outputs = []
         for model in self.cnns:
+            # different size of input, same network architecture
             outputs.append(model(x))
             x = self.downsample(x)
-        return outputs
+            # utilize all outputs to predict class
+        if classsification == False:
+            digits = None
+        else:
+            output_flat = torch.cat([outputs[i].view(x.shape[0],-1) for i in range(len(outputs))], -1)
+            digits = self.FCs[0](output_flat)
+            digits = self.FCs[1](digits)
+            digits = torch.sigmoid(digits)
+        return outputs, digits
 
-    def calc_dis_loss(self, input_fake, input_real):
+    def calc_dis_loss(self, input_fake, input_real, input_label=None):
         # calculate the loss to train D
-        outs0 = self.forward(input_fake)
-        outs1 = self.forward(input_real)
-        loss = 0
+        outs0, _ = self.forward(input_fake, classsification=False)
+        if input_label is not None:
+            outs1, digits1 = self.forward(input_real, classsification=True)
+        else:
+            outs1, digits1 = self.forward(input_real, classsification=False)
+        GAN_loss = 0
 
         for it, (out0, out1) in enumerate(zip(outs0, outs1)):
             if self.gan_type == 'lsgan':
-                loss += torch.mean((out0 - 0)**2) + torch.mean((out1 - 1)**2)
+                GAN_loss += torch.mean((out0 - 0)**2) + torch.mean((out1 - 1)**2)
             elif self.gan_type == 'nsgan':
                 all0 = Variable(torch.zeros_like(out0.data).cuda(), requires_grad=False)
                 all1 = Variable(torch.ones_like(out1.data).cuda(), requires_grad=False)
-                loss += torch.mean(F.binary_cross_entropy(F.sigmoid(out0), all0) +
+                GAN_loss += torch.mean(F.binary_cross_entropy(F.sigmoid(out0), all0) +
                                    F.binary_cross_entropy(F.sigmoid(out1), all1))
             else:
                 assert 0, "Unsupported GAN type: {}".format(self.gan_type)
-        return loss
+        if input_label is not None:
+            target_label = input_label.argmax(1).view(input_label.shape[0])
+            class_loss = F.cross_entropy(digits1, target_label)
+        else:class_loss = 0
+        return GAN_loss, class_loss
 
-    def calc_gen_loss(self, input_fake):
+    def calc_gen_loss(self, input_fake, input_label=None):
         # calculate the loss to train G
-        outs0 = self.forward(input_fake)
+        if input_label is not None:
+            outs0, digits0 = self.forward(input_fake, classsification=True)
+        else:
+            outs0, digits0 = self.forward(input_fake, classsification=False)
         loss = 0
         for it, (out0) in enumerate(outs0):
             if self.gan_type == 'lsgan':
@@ -80,7 +102,11 @@ class MsImageDis(nn.Module):
                 loss += torch.mean(F.binary_cross_entropy(F.sigmoid(out0), all1))
             else:
                 assert 0, "Unsupported GAN type: {}".format(self.gan_type)
-        return loss
+        if input_label is not None:
+            target_label = input_label.argmax(1).view(input_label.shape[0])
+            class_loss = F.cross_entropy(digits0, target_label)
+        else: class_loss = 0
+        return loss, class_loss
 
 ##################################################################################
 # Generator

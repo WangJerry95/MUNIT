@@ -20,6 +20,7 @@ class MUNIT_Trainer(nn.Module):
         self.dis_b = MsImageDis(hyperparameters['input_dim_b'], hyperparameters['dis'])  # discriminator for domain b
         self.instancenorm = nn.InstanceNorm2d(512, affine=False)
         self.style_dim = hyperparameters['gen']['style_dim']
+        self.style_num = 0
 
         # fix the noise used in sampling
         display_size = int(hyperparameters['display_size'])
@@ -64,10 +65,24 @@ class MUNIT_Trainer(nn.Module):
         self.train()
         return x_ab, x_ba
 
-    def gen_update(self, x_a, x_b, hyperparameters):
+    def gen_update(self, x_a, x_b, hyperparameters, label_a=None, label_b=None):
         self.gen_opt.zero_grad()
-        s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
-        s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
+        if label_a is None:
+            s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
+        else:
+            style_num = label_a.size(1)
+            s_a = Variable(torch.randn(x_a.size(0), self.style_dim - style_num, 1, 1).cuda())
+            label_a = label_a.repeat(x_a.size(0), 1)
+            label_a = label_a.reshape(x_a.size(0), style_num, 1, 1)
+            s_a = torch.cat([s_a, label_a], 1)
+        if label_b is None:
+            s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
+        else:
+            style_num = label_b.size(1)
+            s_b = Variable(torch.randn(x_b.size(0), self.style_dim-style_num, 1, 1).cuda())
+            label_b = label_b.repeat(x_b.size(0),1)
+            label_b = label_b.reshape(x_b.size(0), style_num, 1, 1)
+            s_b = torch.cat([s_b, label_b], 1)
         # encode
         c_a, s_a_prime = self.gen_a.encode(x_a)
         c_b, s_b_prime = self.gen_b.encode(x_b)
@@ -94,14 +109,16 @@ class MUNIT_Trainer(nn.Module):
         self.loss_gen_cycrecon_x_a = self.recon_criterion(x_aba, x_a) if hyperparameters['recon_x_cyc_w'] > 0 else 0
         self.loss_gen_cycrecon_x_b = self.recon_criterion(x_bab, x_b) if hyperparameters['recon_x_cyc_w'] > 0 else 0
         # GAN loss
-        self.loss_gen_adv_a = self.dis_a.calc_gen_loss(x_ba)
-        self.loss_gen_adv_b = self.dis_b.calc_gen_loss(x_ab)
+        self.loss_gen_adv_a, self.loss_gen_class_a = self.dis_a.calc_gen_loss(x_ba, label_a)
+        self.loss_gen_adv_b, self.loss_gen_class_b = self.dis_b.calc_gen_loss(x_ab, label_b)
         # domain-invariant perceptual loss
         self.loss_gen_vgg_a = self.compute_vgg_loss(self.vgg, x_ba, x_b) if hyperparameters['vgg_w'] > 0 else 0
         self.loss_gen_vgg_b = self.compute_vgg_loss(self.vgg, x_ab, x_a) if hyperparameters['vgg_w'] > 0 else 0
         # total loss
         self.loss_gen_total = hyperparameters['gan_w'] * self.loss_gen_adv_a + \
                               hyperparameters['gan_w'] * self.loss_gen_adv_b + \
+                              hyperparameters['gan_w'] * self.loss_gen_class_a + \
+                              hyperparameters['gan_w'] * self.loss_gen_class_b + \
                               hyperparameters['recon_x_w'] * self.loss_gen_recon_x_a + \
                               hyperparameters['recon_s_w'] * self.loss_gen_recon_s_a + \
                               hyperparameters['recon_c_w'] * self.loss_gen_recon_c_a + \
@@ -144,20 +161,37 @@ class MUNIT_Trainer(nn.Module):
         self.train()
         return x_a, x_a_recon, x_ab1, x_ab2, x_b, x_b_recon, x_ba1, x_ba2
 
-    def dis_update(self, x_a, x_b, hyperparameters):
+    def dis_update(self, x_a, x_b, hyperparameters, label_a=None, label_b=None,):
         self.dis_opt.zero_grad()
-        s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
-        s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
+        if label_a is None:
+            s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
+        else:# utilize label in the style code
+            style_num = label_a.size(1)
+            s_a = Variable(torch.randn(x_a.size(0), self.style_dim - style_num, 1, 1).cuda())
+            label_a = label_a.repeat(x_a.size(0), 1)
+            label_a = label_a.reshape(x_a.size(0), style_num, 1, 1)
+            s_a = torch.cat([s_a, label_a], 1)
+        if label_b is None:
+            s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
+        else:# utilize label in the style code
+            style_num = label_b.size(1)
+            s_b = Variable(torch.randn(x_b.size(0), self.style_dim-style_num, 1, 1).cuda())
+            label_b = label_b.repeat(x_b.size(0),1)
+            label_b = label_b.reshape(x_b.size(0), style_num, 1, 1)
+            s_b = torch.cat([s_b, label_b], 1)
+
         # encode
         c_a, _ = self.gen_a.encode(x_a)
         c_b, _ = self.gen_b.encode(x_b)
         # decode (cross domain)
-        x_ba = self.gen_a.decode(c_b, s_a)
         x_ab = self.gen_b.decode(c_a, s_b)
+        x_ba = self.gen_a.decode(c_b, s_a)
         # D loss
-        self.loss_dis_a = self.dis_a.calc_dis_loss(x_ba.detach(), x_a)
-        self.loss_dis_b = self.dis_b.calc_dis_loss(x_ab.detach(), x_b)
-        self.loss_dis_total = hyperparameters['gan_w'] * self.loss_dis_a + hyperparameters['gan_w'] * self.loss_dis_b
+        self.loss_dis_a, self.loss_class_b = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
+        self.loss_dis_b, self.loss_class_b = self.dis_b.calc_dis_loss(x_ab.detach(), x_b, label_b)
+
+        self.loss_dis_total = hyperparameters['gan_w'] * self.loss_dis_a + hyperparameters['gan_w'] * self.loss_dis_b + \
+                              hyperparameters['gan_w'] * self.loss_class_a + hyperparameters['gan_w'] * self.loss_class_b
         self.loss_dis_total.backward()
         self.dis_opt.step()
 
