@@ -8,6 +8,7 @@ from torch.autograd import Variable
 import torch
 import torch.nn as nn
 import os
+import numpy as np
 
 class MUNIT_Trainer(nn.Module):
     def __init__(self, hyperparameters):
@@ -20,12 +21,29 @@ class MUNIT_Trainer(nn.Module):
         self.dis_b = MsImageDis(hyperparameters['input_dim_b'], hyperparameters['dis'])  # discriminator for domain b
         self.instancenorm = nn.InstanceNorm2d(512, affine=False)
         self.style_dim = hyperparameters['gen']['style_dim']
-        self.style_num = 0
+        self.a_attibute = hyperparameters['label_a']
+        self.b_attibute = hyperparameters['label_b']
 
         # fix the noise used in sampling
         display_size = int(hyperparameters['display_size'])
-        self.s_a = torch.randn(display_size, self.style_dim, 1, 1).cuda()
-        self.s_b = torch.randn(display_size, self.style_dim, 1, 1).cuda()
+        if self.a_attibute == 0:
+            self.s_a = torch.randn(display_size, self.style_dim, 1, 1).cuda()
+        else:
+            self.s_a = torch.randn(display_size, self.style_dim - self.a_attibute, 1, 1).cuda()
+            s_attribute = [i%self.a_attibute for i in range(display_size)]
+            s_attribute = torch.tensor(s_attribute, dtype=torch.long).reshape((display_size, 1))
+            label_a = torch.zeros(display_size, self.a_attibute, dtype=torch.float32).scatter_(1, s_attribute, 1)
+            label_a = label_a.reshape(display_size, self.a_attibute, 1, 1).cuda()
+            self.s_a = torch.cat([self.s_a, label_a], 1)
+        if self.b_attibute == 0:
+            self.s_b = torch.randn(display_size, self.style_dim, 1, 1).cuda()
+        else:
+            self.s_b = torch.randn(display_size, self.style_dim - self.b_attibute, 1, 1).cuda()
+            s_attribute = [i%self.b_attibute for i in range(display_size)]
+            s_attribute = torch.tensor(s_attribute, dtype=torch.long).reshape((display_size, 1))
+            label_b = torch.zeros(display_size, self.b_attibute, dtype=torch.float32).scatter_(1, s_attribute, 1)
+            label_b = label_b.reshape(display_size, self.b_attibute, 1, 1).cuda()
+            self.s_b = torch.cat([self.s_b, label_b], 1)
 
         # Setup the optimizers
         beta1 = hyperparameters['beta1']
@@ -187,7 +205,7 @@ class MUNIT_Trainer(nn.Module):
         x_ab = self.gen_b.decode(c_a, s_b)
         x_ba = self.gen_a.decode(c_b, s_a)
         # D loss
-        self.loss_dis_a, self.loss_class_b = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
+        self.loss_dis_a, self.loss_class_a = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
         self.loss_dis_b, self.loss_class_b = self.dis_b.calc_dis_loss(x_ab.detach(), x_b, label_b)
 
         self.loss_dis_total = hyperparameters['gan_w'] * self.loss_dis_a + hyperparameters['gan_w'] * self.loss_dis_b + \
