@@ -102,28 +102,28 @@ class MUNIT_Trainer(nn.Module):
             label_b = label_b.reshape(x_b.size(0), style_num, 1, 1)
             s_b = torch.cat([s_b, label_b], 1)
         # encode
-        c_a, s_a_prime = self.gen_a.encode(x_a)
-        c_b, s_b_prime = self.gen_b.encode(x_b)
+        self.c_a, self.s_a_prime = self.gen_a.encode(x_a)
+        self.c_b, self.s_b_prime = self.gen_b.encode(x_b)
         # decode (within domain)
-        x_a_recon = self.gen_a.decode(c_a, s_a_prime)
-        x_b_recon = self.gen_b.decode(c_b, s_b_prime)
+        x_a_recon = self.gen_a.decode(self.c_a, self.s_a_prime)
+        x_b_recon = self.gen_b.decode(self.c_b, self.s_b_prime)
         # decode (cross domain)
-        x_ba = self.gen_a.decode(c_b, s_a)
-        x_ab = self.gen_b.decode(c_a, s_b)
+        x_ba = self.gen_a.decode(self.c_b, s_a)
+        x_ab = self.gen_b.decode(self.c_a, s_b)
         # encode again
         c_b_recon, s_a_recon = self.gen_a.encode(x_ba)
         c_a_recon, s_b_recon = self.gen_b.encode(x_ab)
         # decode again (if needed)
-        x_aba = self.gen_a.decode(c_a_recon, s_a_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
-        x_bab = self.gen_b.decode(c_b_recon, s_b_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
+        x_aba = self.gen_a.decode(c_a_recon, self.s_a_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
+        x_bab = self.gen_b.decode(c_b_recon, self.s_b_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
 
         # reconstruction loss
         self.loss_gen_recon_x_a = self.recon_criterion(x_a_recon, x_a)
         self.loss_gen_recon_x_b = self.recon_criterion(x_b_recon, x_b)
         self.loss_gen_recon_s_a = self.recon_criterion(s_a_recon, s_a)
         self.loss_gen_recon_s_b = self.recon_criterion(s_b_recon, s_b)
-        self.loss_gen_recon_c_a = self.recon_criterion(c_a_recon, c_a)
-        self.loss_gen_recon_c_b = self.recon_criterion(c_b_recon, c_b)
+        self.loss_gen_recon_c_a = self.recon_criterion(c_a_recon, self.c_a)
+        self.loss_gen_recon_c_b = self.recon_criterion(c_b_recon, self.c_b)
         self.loss_gen_cycrecon_x_a = self.recon_criterion(x_aba, x_a) if hyperparameters['recon_x_cyc_w'] > 0 else 0
         self.loss_gen_cycrecon_x_b = self.recon_criterion(x_bab, x_b) if hyperparameters['recon_x_cyc_w'] > 0 else 0
         # GAN loss

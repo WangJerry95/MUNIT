@@ -496,7 +496,7 @@ class AdaptiveInstanceNorm2d(nn.Module):
         running_var = self.running_var.repeat(b)
 
         # Apply instance norm
-        x_reshaped = x.contiguous().view(1, b * c, *x.size()[2:])
+        x_reshaped = x.contiguous().view(1, b * c, *x.size()[2:]) # (1, b*c, w, h), merge the batch images to one batch
 
         out = F.batch_norm(
             x_reshaped, running_mean, running_var, self.weight, self.bias,
