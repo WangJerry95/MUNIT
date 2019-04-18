@@ -205,7 +205,7 @@ class MUNIT_Trainer(nn.Module):
         x_ab = self.gen_b.decode(c_a, s_b)
         x_ba = self.gen_a.decode(c_b, s_a)
         # D loss
-        self.loss_dis_a, self.loss_class_b = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
+        self.loss_dis_a, self.loss_class_a = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
         self.loss_dis_b, self.loss_class_b = self.dis_b.calc_dis_loss(x_ab.detach(), x_b, label_b)
 
         self.loss_dis_total = hyperparameters['gan_w'] * self.loss_dis_a + hyperparameters['gan_w'] * self.loss_dis_b + \

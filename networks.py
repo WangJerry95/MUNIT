@@ -10,6 +10,7 @@ try:
     from itertools import izip as zip
 except ImportError: # will be 3.x series
     pass
+import numpy as np
 
 ##################################################################################
 # Discriminator
@@ -134,6 +135,9 @@ class AdaINGen(nn.Module):
         # MLP to generate AdaIN parameters
         self.mlp = MLP(style_dim, self.get_num_adain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
 
+        # Style decoder to generate SmanIN parameters
+        self.dec_style = StyleDecoder(style_dim, 16, 8, self.get_num_smain_params(self.dec), 3)
+
     def forward(self, images):
         # reconstruct an image
         content, style_fake = self.encode(images)
@@ -149,7 +153,9 @@ class AdaINGen(nn.Module):
     def decode(self, content, style):
         # decode content and style codes to an image
         adain_params = self.mlp(style)
+        smain_params = self.dec_style(style)
         self.assign_adain_params(adain_params, self.dec)
+        self.assign_smain_params(smain_params, self.dec)
         images = self.dec(content)
         return images
 
@@ -171,6 +177,27 @@ class AdaINGen(nn.Module):
             if m.__class__.__name__ == "AdaptiveInstanceNorm2d":
                 num_adain_params += 2*m.num_features
         return num_adain_params
+
+    def assign_smain_params(self, smain_params, model):
+        # assign the adain_params to the AdaIN layers in model
+        for m in model.modules():
+            if m.__class__.__name__ == "SemanticInstanceNorm2d":
+                weight = smain_params[0][:, :m.num_features, :, :]
+                bias = smain_params[1][:, :m.num_features]
+                # merge the batch and channel dimension
+                m.bias = bias.contiguous().view(-1)
+                m.weight = weight.contiguous().view(-1, weight.shape[2], weight.shape[3])
+                if smain_params[0].size(1) > m.num_features:
+                    smain_params[0] = smain_params[0][:, m.num_features:, : ,:]
+                    smain_params[1] = smain_params[1][:, m.num_features:]
+
+    def get_num_smain_params(self, model):
+        # return the number of SmaIN parameters needed by the model
+        num_smain_params = 0
+        for m in model.modules():
+            if m.__class__.__name__ == "SemanticInstanceNorm2d":
+                num_smain_params += m.num_features
+        return num_smain_params
 
 
 class VAEGen(nn.Module):
@@ -252,7 +279,8 @@ class Decoder(nn.Module):
 
         self.model = []
         # AdaIN residual blocks
-        self.model += [ResBlocks(n_res, dim, res_norm, activ, pad_type=pad_type)]
+        self.model += [ResBlocks(n_res-1, dim, res_norm, activ, pad_type=pad_type)]
+        self.model += [ResBlock(dim, 'smain', activ, pad_type=pad_type)]
         # upsampling blocks
         for i in range(n_upsample):
             self.model += [nn.Upsample(scale_factor=2),
@@ -264,6 +292,28 @@ class Decoder(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+class StyleDecoder(nn.Module):
+    def __init__(self, style_dim, input_dim, input_length, output_dim, num_layer, norm='ln', activ='relu', pad_type='zero'):
+        super(StyleDecoder, self).__init__()
+        self.input_dim = input_dim
+        self.input_length = input_length
+        self.model = []
+        self.mlp = MLP(style_dim, input_dim*input_length**2, 256, 3, 'none', activ)
+        self.fc = LinearBlock(input_dim*input_length**2, output_dim, norm='none', activation='tanh')
+        for i in range(num_layer):
+            self.model += [nn.Upsample(scale_factor=2),
+                           Conv2dBlock(input_dim, input_dim * 2, 5, 1, 2, norm=norm, activation=activ, pad_type=pad_type)]
+            input_dim *= 2
+        self.model += [Conv2dBlock(input_dim, output_dim, 7, 1, 3, norm='none', activation='tanh', pad_type=pad_type)]
+        self.model = nn.Sequential(*self.model)
+
+    def forward(self, x):
+        x = self.mlp(x)
+        bias = self.fc(x)
+        x = x.view(1, self.input_dim, self.input_length, self.input_length)
+        return [self.model(x), bias] # weight: (b, output_dim, w, h); bias: (b, output_dim)
+
 
 ##################################################################################
 # Sequential Models
@@ -312,7 +362,7 @@ class ResBlock(nn.Module):
         return out
 
 class Conv2dBlock(nn.Module):
-    def __init__(self, input_dim ,output_dim, kernel_size, stride,
+    def __init__(self, input_dim, output_dim, kernel_size, stride,
                  padding=0, norm='none', activation='relu', pad_type='zero'):
         super(Conv2dBlock, self).__init__()
         self.use_bias = True
@@ -337,6 +387,8 @@ class Conv2dBlock(nn.Module):
             self.norm = LayerNorm(norm_dim)
         elif norm == 'adain':
             self.norm = AdaptiveInstanceNorm2d(norm_dim)
+        elif norm == 'smain':
+            self.norm = SemanticInstanceNorm2d(norm_dim)
         elif norm == 'none' or norm == 'sn':
             self.norm = None
         else:
@@ -507,6 +559,35 @@ class AdaptiveInstanceNorm2d(nn.Module):
     def __repr__(self):
         return self.__class__.__name__ + '(' + str(self.num_features) + ')'
 
+class SemanticInstanceNorm2d(nn.Module):
+    def __init__(self, num_features, eps=1e-5, momentum=0.1):
+        super(SemanticInstanceNorm2d, self).__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.momentum = momentum
+        # weight and bias are dynamically assigned
+        self.weight = None # shape of (1, num_feature, feature_w, feature_h)
+        self.bias = None # shape of (1, num_feature)
+        # just dummy buffers, not used
+        self.register_buffer('running_mean', torch.zeros(num_features))
+        self.register_buffer('running_var', torch.ones(num_features))
+
+    def forward(self, x):
+        assert self.weight is not None and self.bias is not None, "Please assign weight and bias before calling AdaIN!"
+        b, c = x.size(0), x.size(1)
+        running_mean = self.running_mean.repeat(b)
+        running_var = self.running_var.repeat(b)
+
+        # Apply instance norm
+        x_reshaped = x.contiguous().view(b * c, *x.size()[2:]) # (1, b*c, w, h), merge the batch images to one batch
+        bias_reshape = self.bias.view(-1,1,1)
+
+        out = x_reshaped.mul(self.weight) + bias_reshape
+
+        return out.view(b, c, *x.size()[2:])
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(' + str(self.num_features) + ')'
 
 class LayerNorm(nn.Module):
     def __init__(self, num_features, eps=1e-5, affine=True):
