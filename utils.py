@@ -2,7 +2,7 @@
 Copyright (C) 2018 NVIDIA Corporation.  All rights reserved.
 Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 """
-from torch.utils.serialization import load_lua
+#from torch.utils.serialization import load_lua
 from torch.utils.data import DataLoader
 from networks import Vgg16
 from torch.autograd import Variable
@@ -176,11 +176,12 @@ def write_loss(iterations, trainer, train_writer):
     members = [attr for attr in dir(trainer) \
                if not callable(getattr(trainer, attr)) and not attr.startswith("__") and ('loss' in attr or 'grad' in attr or 'nwd' in attr)]
     for m in members:
-        train_writer.add_scalar(m, getattr(trainer, m), iterations + 1)
-    train_writer.add_histogram('c_a', getattr(trainer, 'c_a'), iterations + 1)
-    train_writer.add_histogram('c_b', getattr(trainer, 'c_b'), iterations + 1)
-    train_writer.add_histogram('s_a_prime', getattr(trainer, 's_a_prime'), iterations + 1)
-    train_writer.add_histogram('s_b_prime', getattr(trainer, 's_b_prime'), iterations + 1)
+        train_writer.add_scalar(m[5:8]+'/'+m, getattr(trainer, m), iterations + 1)
+
+    train_writer.add_histogram('c_a', trainer.c_b, iterations + 1)
+    train_writer.add_histogram('c_b', trainer.c_b, iterations + 1)
+    train_writer.add_histogram('s_a_prime', trainer.s_a_prime, iterations + 1)
+    train_writer.add_histogram('s_b_prime', trainer.s_b_prime, iterations + 1)
 
 
 def slerp(val, low, high):

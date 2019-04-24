@@ -130,13 +130,15 @@ class AdaINGen(nn.Module):
 
         # content encoder
         self.enc_content = ContentEncoder(n_downsample, n_res, input_dim, dim, 'in', activ, pad_type=pad_type)
-        self.dec = Decoder(n_downsample, n_res, self.enc_content.output_dim, input_dim, res_norm='adain', activ=activ, pad_type=pad_type)
+        self.dec = Decoder(n_downsample, n_res, self.enc_content.output_dim, input_dim, res_norm='smain', activ=activ, pad_type=pad_type)
 
         # MLP to generate AdaIN parameters
-        self.mlp = MLP(style_dim, self.get_num_adain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
+        self.mlp = MLP(style_dim, self.get_num_smain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
 
         # Style decoder to generate SmanIN parameters
-        self.dec_style = StyleDecoder(style_dim, 16, 8, self.get_num_smain_params(self.dec), 3)
+        output_dim = self.enc_content.output_dim
+        self.semantic_dec = SemanticDecoder(output_dim, output_dim//2, self.get_num_smain_params(self.dec), 3, 3,
+                                            norm='in', activ='lrelu', conv_type='regular')
 
     def forward(self, images):
         # reconstruct an image
@@ -152,10 +154,9 @@ class AdaINGen(nn.Module):
 
     def decode(self, content, style):
         # decode content and style codes to an image
-        adain_params = self.mlp(style)
-        smain_params = self.dec_style(style)
-        self.assign_adain_params(adain_params, self.dec)
-        self.assign_smain_params(smain_params, self.dec)
+        smain_params_bias = self.mlp(style)
+        smain_params_weight = self.semantic_dec(content)
+        self.assign_smain_params([smain_params_weight, smain_params_bias], self.dec)
         images = self.dec(content)
         return images
 
@@ -185,10 +186,10 @@ class AdaINGen(nn.Module):
                 weight = smain_params[0][:, :m.num_features, :, :]
                 bias = smain_params[1][:, :m.num_features]
                 # merge the batch and channel dimension
-                m.bias = bias.contiguous().view(-1)
-                m.weight = weight.contiguous().view(-1, weight.shape[2], weight.shape[3])
+                m.bias = bias
+                m.weight = weight
                 if smain_params[0].size(1) > m.num_features:
-                    smain_params[0] = smain_params[0][:, m.num_features:, : ,:]
+                    smain_params[0] = smain_params[0][:, m.num_features:, :, :]
                     smain_params[1] = smain_params[1][:, m.num_features:]
 
     def get_num_smain_params(self, model):
@@ -279,8 +280,7 @@ class Decoder(nn.Module):
 
         self.model = []
         # AdaIN residual blocks
-        self.model += [ResBlocks(n_res-1, dim, res_norm, activ, pad_type=pad_type)]
-        self.model += [ResBlock(dim, 'smain', activ, pad_type=pad_type)]
+        self.model += [ResBlocks(n_res, dim, res_norm, activ, pad_type=pad_type)]
         # upsampling blocks
         for i in range(n_upsample):
             self.model += [nn.Upsample(scale_factor=2),
@@ -293,26 +293,43 @@ class Decoder(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-class StyleDecoder(nn.Module):
-    def __init__(self, style_dim, input_dim, input_length, output_dim, num_layer, norm='ln', activ='relu', pad_type='zero'):
-        super(StyleDecoder, self).__init__()
+class SemanticDecoder(nn.Module):
+    def __init__(self, input_dim, dim, output_dim, num_layer, k_size, norm='in', activ='lrelu',
+                 pad_type='zero', conv_type='regular'):
+        super(SemanticDecoder, self).__init__()
         self.input_dim = input_dim
-        self.input_length = input_length
         self.model = []
-        self.mlp = MLP(style_dim, input_dim*input_length**2, 256, 3, 'none', activ)
-        self.fc = LinearBlock(input_dim*input_length**2, output_dim, norm='none', activation='tanh')
-        for i in range(num_layer):
-            self.model += [nn.Upsample(scale_factor=2),
-                           Conv2dBlock(input_dim, input_dim * 2, 5, 1, 2, norm=norm, activation=activ, pad_type=pad_type)]
-            input_dim *= 2
-        self.model += [Conv2dBlock(input_dim, output_dim, 7, 1, 3, norm='none', activation='tanh', pad_type=pad_type)]
-        self.model = nn.Sequential(*self.model)
+        if conv_type == 'regular':
+            self.model += [Conv2dBlock(input_dim, dim, k_size, 1, k_size // 2,
+                                       norm=norm, activation=activ, pad_type=pad_type)]
+            for i in range(num_layer-2):
+                self.model += [Conv2dBlock(dim, dim, k_size, 1, k_size//2,
+                                           norm=norm, activation=activ, pad_type=pad_type)]
+            self.model += [Conv2dBlock(dim, output_dim, k_size, 1, k_size//2,
+                                       norm=norm, activation=activ, pad_type=pad_type)]
+            self.model = nn.Sequential(*self.model)
+        if conv_type == 'depthwise':
+            self.model += [nn.Conv2d(input_dim, input_dim, k_size, 1, k_size//2, groups=input_dim),
+                           nn.InstanceNorm2d(input_dim),
+                           nn.LeakyReLU(inplace=True)]
+            self.model += [nn.Conv2d(input_dim, dim, 1, 1, 0, bias=False),
+                           nn.InstanceNorm2d(dim),
+                           nn.LeakyReLU(inplace=True)]
+            for i in range(num_layer-2):
+                self.model += [nn.Conv2d(dim, dim, k_size, 1, k_size // 2, groups=input_dim),
+                               nn.InstanceNorm2d(input_dim),
+                               nn.LeakyReLU(inplace=True)]
+            self.model += [nn.Conv2d(dim, dim, k_size, 1, k_size//2, groups=dim),
+                           nn.InstanceNorm2d(input_dim),
+                           nn.LeakyReLU(inplace=True)]
+            self.model += [nn.Conv2d(dim, output_dim, 1, 1, 0, bias=False),
+                           nn.InstanceNorm2d(dim),
+                           nn.LeakyReLU(inplace=True)]
+            self.model = nn.Sequential(*self.model)
 
     def forward(self, x):
-        x = self.mlp(x)
-        bias = self.fc(x)
-        x = x.view(1, self.input_dim, self.input_length, self.input_length)
-        return [self.model(x), bias] # weight: (b, output_dim, w, h); bias: (b, output_dim)
+
+        return self.model(x)  # weight: (b, output_dim, w, h);
 
 
 ##################################################################################
@@ -351,8 +368,8 @@ class ResBlock(nn.Module):
         super(ResBlock, self).__init__()
 
         model = []
-        model += [Conv2dBlock(dim ,dim, 3, 1, 1, norm=norm, activation=activation, pad_type=pad_type)]
-        model += [Conv2dBlock(dim ,dim, 3, 1, 1, norm=norm, activation='none', pad_type=pad_type)]
+        model += [Conv2dBlock(dim, dim, 3, 1, 1, norm=norm, activation=activation, pad_type=pad_type)]
+        model += [Conv2dBlock(dim, dim, 3, 1, 1, norm=norm, activation='none', pad_type=pad_type)]
         self.model = nn.Sequential(*model)
 
     def forward(self, x):
@@ -566,7 +583,7 @@ class SemanticInstanceNorm2d(nn.Module):
         self.eps = eps
         self.momentum = momentum
         # weight and bias are dynamically assigned
-        self.weight = None # shape of (1, num_feature, feature_w, feature_h)
+        self.weight = None # shape of (b, num_feature, feature_w, feature_h)
         self.bias = None # shape of (1, num_feature)
         # just dummy buffers, not used
         self.register_buffer('running_mean', torch.zeros(num_features))
@@ -577,14 +594,11 @@ class SemanticInstanceNorm2d(nn.Module):
         b, c = x.size(0), x.size(1)
         running_mean = self.running_mean.repeat(b)
         running_var = self.running_var.repeat(b)
-
+        self.bias = self.bias.view(1, -1, 1, 1)
         # Apply instance norm
-        x_reshaped = x.contiguous().view(b * c, *x.size()[2:]) # (1, b*c, w, h), merge the batch images to one batch
-        bias_reshape = self.bias.view(-1,1,1)
+        out = x.mul(self.weight) + self.bias
 
-        out = x_reshaped.mul(self.weight) + bias_reshape
-
-        return out.view(b, c, *x.size()[2:])
+        return out
 
     def __repr__(self):
         return self.__class__.__name__ + '(' + str(self.num_features) + ')'
