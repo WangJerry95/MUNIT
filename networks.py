@@ -584,7 +584,7 @@ class SemanticInstanceNorm2d(nn.Module):
         self.momentum = momentum
         # weight and bias are dynamically assigned
         self.weight = None # shape of (b, num_feature, feature_w, feature_h)
-        self.bias = None # shape of (1, num_feature)
+        self.bias = None # shape of (b, num_feature)
         # just dummy buffers, not used
         self.register_buffer('running_mean', torch.zeros(num_features))
         self.register_buffer('running_var', torch.ones(num_features))
@@ -594,7 +594,8 @@ class SemanticInstanceNorm2d(nn.Module):
         b, c = x.size(0), x.size(1)
         running_mean = self.running_mean.repeat(b)
         running_var = self.running_var.repeat(b)
-        self.bias = self.bias.view(1, -1, 1, 1)
+        self.bias = self.bias.unsqueeze(-1)
+        self.bias = self.bias.unsqueeze(-1)
         # Apply instance norm
         out = x.mul(self.weight) + self.bias
 
