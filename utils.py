@@ -4,7 +4,7 @@ Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses
 """
 #from torch.utils.serialization import load_lua
 from torch.utils.data import DataLoader
-from networks import Vgg16
+from model.networks import Vgg16
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
 from torchvision import transforms
@@ -173,15 +173,15 @@ def write_html(filename, iterations, image_save_iterations, image_directory, all
 
 
 def write_loss(iterations, trainer, train_writer):
-    members = [attr for attr in dir(trainer) \
-               if not callable(getattr(trainer, attr)) and not attr.startswith("__") and ('loss' in attr or 'grad' in attr or 'nwd' in attr)]
+    members = [attr for attr in dir(trainer.MUNIT_model_on_one_gpu)
+               if not callable(getattr(trainer.MUNIT_model_on_one_gpu, attr)) and not attr.startswith("__") and ('loss' in attr or 'grad' in attr or 'nwd' in attr)]
     for m in members:
-        train_writer.add_scalar(m[5:8]+'/'+m, getattr(trainer, m), iterations + 1)
+        train_writer.add_scalar(m[5:8]+'/'+m, getattr(trainer.MUNIT_model_on_one_gpu, m), iterations + 1)
 
-    train_writer.add_histogram('c_a', trainer.c_b, iterations + 1)
-    train_writer.add_histogram('c_b', trainer.c_b, iterations + 1)
-    train_writer.add_histogram('s_a_prime', trainer.s_a_prime, iterations + 1)
-    train_writer.add_histogram('s_b_prime', trainer.s_b_prime, iterations + 1)
+    train_writer.add_histogram('c_a', trainer.MUNIT_model_on_one_gpu.c_b, iterations + 1)
+    train_writer.add_histogram('c_b', trainer.MUNIT_model_on_one_gpu.c_b, iterations + 1)
+    train_writer.add_histogram('s_a_prime', trainer.MUNIT_model_on_one_gpu.s_a_prime, iterations + 1)
+    train_writer.add_histogram('s_b_prime', trainer.MUNIT_model_on_one_gpu.s_b_prime, iterations + 1)
 
 
 def slerp(val, low, high):

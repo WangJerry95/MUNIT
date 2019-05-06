@@ -5,7 +5,7 @@ Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses
 from utils import get_all_data_loaders, prepare_sub_folder, write_html, write_loss, get_config, write_2images, Timer
 import argparse
 from torch.autograd import Variable
-from trainer import MUNIT_Trainer, UNIT_Trainer
+from trainer import MUNIT_Trainer
 import torch.backends.cudnn as cudnn
 import torch
 try:
@@ -17,7 +17,6 @@ import sys
 import tensorboardX
 import shutil
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=str, default='configs/edges2handbags_folder.yaml', help='Path to the config file.')
@@ -25,8 +24,8 @@ parser.add_argument('--output_path', type=str, default='.', help="outputs path")
 parser.add_argument("--resume", action="store_true")
 parser.add_argument('--trainer', type=str, default='MUNIT', help="MUNIT|UNIT")
 opts = parser.parse_args()
-
 cudnn.benchmark = True
+
 
 # Load experiment setting
 config = get_config(opts.config)
@@ -37,11 +36,11 @@ config['vgg_model_path'] = opts.output_path
 # Setup model and data loader
 if opts.trainer == 'MUNIT':
     trainer = MUNIT_Trainer(config)
-elif opts.trainer == 'UNIT':
-    trainer = UNIT_Trainer(config)
+# elif opts.trainer == 'UNIT':
+#     trainer = UNIT_Trainer(config)
 else:
     sys.exit("Only support MUNIT|UNIT")
-trainer.cuda()
+
 train_loader_a, train_loader_b, test_loader_a, test_loader_b = get_all_data_loaders(config)
 
 train_display_images_a = torch.stack([train_loader_a.dataset[i] for i in range(display_size)]).cuda()
@@ -77,8 +76,8 @@ while True:
         # Write images
         if (iterations + 1) % config['image_save_iter'] == 0:
             with torch.no_grad():
-                test_image_outputs = trainer.sample(test_display_images_a, test_display_images_b)
-                train_image_outputs = trainer.sample(train_display_images_a, train_display_images_b)
+                test_image_outputs = trainer.MUNIT_model_on_one_gpu.sample(test_display_images_a, test_display_images_b)
+                train_image_outputs = trainer.MUNIT_model_on_one_gpu.sample(train_display_images_a, train_display_images_b)
             write_2images(test_image_outputs, display_size, image_directory, 'test_%08d' % (iterations + 1))
             write_2images(train_image_outputs, display_size, image_directory, 'train_%08d' % (iterations + 1))
             # HTML
@@ -86,12 +85,12 @@ while True:
 
         if (iterations + 1) % config['image_display_iter'] == 0:
             with torch.no_grad():
-                image_outputs = trainer.sample(train_display_images_a, train_display_images_b)
+                image_outputs = trainer.MUNIT_model_on_one_gpu.sample(train_display_images_a, train_display_images_b)
             write_2images(image_outputs, display_size, image_directory, 'train_current')
 
         # Save network weights
         if (iterations + 1) % config['snapshot_save_iter'] == 0:
-            trainer.save(checkpoint_directory, iterations)
+            trainer.MUNIT_model_on_one_gpu.save(checkpoint_directory, iterations)
 
         iterations += 1
         if iterations >= max_iter:
