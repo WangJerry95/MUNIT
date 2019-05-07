@@ -6,11 +6,11 @@ image_save_iter: 5000         # How often do you want to save output images duri
 image_display_iter: 200       # How often do you want to display output images during training
 display_size: 20              # How many images do you want to display each time
 snapshot_save_iter: 5000      # How often do you want to save trained models
-log_iter: 20                   # How often do you want to log the training stats
+log_iter: 50                   # How often do you want to log the training stats
 
 # optimization options
 max_iter: 100000              # maximum number of training iterations
-batch_size: 1                 # batch size
+batch_size: 8                 # batch size
 weight_decay: 0.0001          # weight decay
 beta1: 0.5                    # Adam parameter
 beta2: 0.999                  # Adam parameter
@@ -23,7 +23,7 @@ gan_w: 1                      # weight of adversarial loss
 recon_x_w: 10                 # weight of image reconstruction loss
 recon_s_w: 1                  # weight of style reconstruction loss
 recon_c_w: 1                  # weight of content reconstruction loss
-recon_x_cyc_w: 10             # weight of explicit style augmented cycle consistency loss
+recon_x_cyc_w: 0             # weight of explicit style augmented cycle consistency loss
 vgg_w: 0                      # weight of domain-invariant perceptual loss
 
 # model options

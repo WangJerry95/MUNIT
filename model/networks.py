@@ -86,7 +86,7 @@ class MsImageDis(nn.Module):
             target_label = input_label.argmax(1).view(input_label.shape[0])
             class_loss = F.cross_entropy(digits1, target_label)
         else:
-            class_loss = 0
+            class_loss = torch.tensor(0.0, requires_grad=False).cuda()
         return GAN_loss, class_loss
 
     def calc_gen_loss(self, input_fake, input_label=None):
@@ -108,7 +108,7 @@ class MsImageDis(nn.Module):
             target_label = input_label.argmax(1).view(input_label.shape[0])
             class_loss = F.cross_entropy(digits0, target_label)
         else:
-            class_loss = 0
+            class_loss = torch.tensor(0.0, requires_grad=False).cuda()
         return loss, class_loss
 
 ##################################################################################

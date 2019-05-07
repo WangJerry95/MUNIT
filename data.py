@@ -5,6 +5,7 @@ Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses
 import torch.utils.data as data
 import os.path
 import numpy as np
+import random
 
 def default_loader(path):
     return Image.open(path).convert('RGB')
@@ -102,9 +103,11 @@ def make_dataset(dir):
 
 class ImageFolder(data.Dataset):
 
-    def __init__(self, root, transform=None, return_paths=False,
+    def __init__(self, root, transform=None, return_paths=False, shuffle=False,
                  loader=default_loader):
         imgs = sorted(make_dataset(root))
+        if shuffle:
+            random.shuffle(imgs)
         if len(imgs) == 0:
             raise(RuntimeError("Found 0 images in: " + root + "\n"
                                "Supported image extensions are: " +

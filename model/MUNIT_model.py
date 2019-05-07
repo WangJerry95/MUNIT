@@ -78,11 +78,11 @@ class MUNIT_model(nn.Module):
     def forward(self, x_a, x_b, hyperparameters, mode='generator', label_a=None, label_b=None):
 
         if mode == 'generator':
-            loss_gen_total, x_ab, x_ba = self.compute_gen_loss(x_a, x_b, hyperparameters, label_a, label_b)
-            return loss_gen_total, x_ab, x_ba
+            total_losses, losses, x_ab, x_ba = self.compute_gen_loss(x_a, x_b, hyperparameters, label_a, label_b)
+            return losses, losses, x_ab, x_ba
         if mode == 'discriminator':
-            loss_dis_total, x_ab, x_ba = self.compute_dis_loss(x_a, x_b, hyperparameters, label_a, label_b)
-            return loss_dis_total, x_ab, x_ba
+            total_losses, losses, x_ab, x_ba = self.compute_dis_loss(x_a, x_b, hyperparameters, label_a, label_b)
+            return total_losses, losses, x_ab, x_ba
         if mode == 'sample':
             self.eval()
             s_a1 = Variable(self.s_a)
@@ -124,53 +124,69 @@ class MUNIT_model(nn.Module):
             label_b = label_b.reshape(x_b.size(0), style_num, 1, 1)
             s_b = torch.cat([s_b, label_b], 1)
         # encode
-        self.c_a, self.s_a_prime = self.gen_a.encode(x_a)
-        self.c_b, self.s_b_prime = self.gen_b.encode(x_b)
+        c_a, s_a_prime = self.gen_a.encode(x_a)
+        c_b, s_b_prime = self.gen_b.encode(x_b)
         # decode (within domain)
-        x_a_recon = self.gen_a.decode(self.c_a, self.s_a_prime)
-        x_b_recon = self.gen_b.decode(self.c_b, self.s_b_prime)
+        x_a_recon = self.gen_a.decode(c_a, s_a_prime)
+        x_b_recon = self.gen_b.decode(c_b, s_b_prime)
         # decode (cross domain)
-        x_ba = self.gen_a.decode(self.c_b, s_a)
-        x_ab = self.gen_b.decode(self.c_a, s_b)
+        x_ba = self.gen_a.decode(c_b, s_a)
+        x_ab = self.gen_b.decode(c_a, s_b)
         # encode again
         c_b_recon, s_a_recon = self.gen_a.encode(x_ba)
         c_a_recon, s_b_recon = self.gen_b.encode(x_ab)
         # decode again (if needed)
-        x_aba = self.gen_a.decode(c_a_recon, self.s_a_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
-        x_bab = self.gen_b.decode(c_b_recon, self.s_b_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
+        x_aba = self.gen_a.decode(c_a_recon, s_a_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
+        x_bab = self.gen_b.decode(c_b_recon, s_b_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
 
         # reconstruction loss
-        self.loss_gen_recon_x_a = self.recon_criterion(x_a_recon, x_a)
-        self.loss_gen_recon_x_b = self.recon_criterion(x_b_recon, x_b)
-        self.loss_gen_recon_s_a = self.recon_criterion(s_a_recon, s_a)
-        self.loss_gen_recon_s_b = self.recon_criterion(s_b_recon, s_b)
-        self.loss_gen_recon_c_a = self.recon_criterion(c_a_recon, self.c_a)
-        self.loss_gen_recon_c_b = self.recon_criterion(c_b_recon, self.c_b)
-        self.loss_gen_cycrecon_x_a = self.recon_criterion(x_aba, x_a) if hyperparameters['recon_x_cyc_w'] > 0 else 0
-        self.loss_gen_cycrecon_x_b = self.recon_criterion(x_bab, x_b) if hyperparameters['recon_x_cyc_w'] > 0 else 0
+        loss_gen_recon_x_a = self.recon_criterion(x_a_recon, x_a)
+        loss_gen_recon_x_b = self.recon_criterion(x_b_recon, x_b)
+        loss_gen_recon_s_a = self.recon_criterion(s_a_recon, s_a)
+        loss_gen_recon_s_b = self.recon_criterion(s_b_recon, s_b)
+        loss_gen_recon_c_a = self.recon_criterion(c_a_recon, c_a)
+        loss_gen_recon_c_b = self.recon_criterion(c_b_recon, c_b)
+        loss_gen_cycrecon_x_a = self.recon_criterion(x_aba, x_a) if hyperparameters['recon_x_cyc_w'] > 0 else torch.tensor(0.0, requires_grad=False).cuda()
+        loss_gen_cycrecon_x_b = self.recon_criterion(x_bab, x_b) if hyperparameters['recon_x_cyc_w'] > 0 else torch.tensor(0.0, requires_grad=False).cuda()
         # GAN loss
-        self.loss_gen_adv_a, self.loss_gen_class_a = self.dis_a.calc_gen_loss(x_ba, label_a)
-        self.loss_gen_adv_b, self.loss_gen_class_b = self.dis_b.calc_gen_loss(x_ab, label_b)
+        loss_gen_adv_a, loss_gen_class_a = self.dis_a.calc_gen_loss(x_ba, label_a)
+        loss_gen_adv_b, loss_gen_class_b = self.dis_b.calc_gen_loss(x_ab, label_b)
         # domain-invariant perceptual loss
-        self.loss_gen_vgg_a = self.compute_vgg_loss(self.vgg, x_ba, x_b) if hyperparameters['vgg_w'] > 0 else 0
-        self.loss_gen_vgg_b = self.compute_vgg_loss(self.vgg, x_ab, x_a) if hyperparameters['vgg_w'] > 0 else 0
+        loss_gen_vgg_a = self.compute_vgg_loss(self.vgg, x_ba, x_b) if hyperparameters['vgg_w'] > 0 else torch.tensor(0.0, requires_grad=False).cuda()
+        loss_gen_vgg_b = self.compute_vgg_loss(self.vgg, x_ab, x_a) if hyperparameters['vgg_w'] > 0 else torch.tensor(0.0, requires_grad=False).cuda()
         # total loss
-        self.loss_gen_total = hyperparameters['gan_w'] * self.loss_gen_adv_a + \
-                              hyperparameters['gan_w'] * self.loss_gen_adv_b + \
-                              hyperparameters['gan_w'] * self.loss_gen_class_a + \
-                              hyperparameters['gan_w'] * self.loss_gen_class_b + \
-                              hyperparameters['recon_x_w'] * self.loss_gen_recon_x_a + \
-                              hyperparameters['recon_s_w'] * self.loss_gen_recon_s_a + \
-                              hyperparameters['recon_c_w'] * self.loss_gen_recon_c_a + \
-                              hyperparameters['recon_x_w'] * self.loss_gen_recon_x_b + \
-                              hyperparameters['recon_s_w'] * self.loss_gen_recon_s_b + \
-                              hyperparameters['recon_c_w'] * self.loss_gen_recon_c_b + \
-                              hyperparameters['recon_x_cyc_w'] * self.loss_gen_cycrecon_x_a + \
-                              hyperparameters['recon_x_cyc_w'] * self.loss_gen_cycrecon_x_b + \
-                              hyperparameters['vgg_w'] * self.loss_gen_vgg_a + \
-                              hyperparameters['vgg_w'] * self.loss_gen_vgg_b
+        loss_gen_total = hyperparameters['gan_w'] * loss_gen_adv_a + \
+                         hyperparameters['gan_w'] * loss_gen_adv_b + \
+                         hyperparameters['recon_x_w'] * loss_gen_recon_x_a + \
+                         hyperparameters['recon_s_w'] * loss_gen_recon_s_a + \
+                         hyperparameters['recon_c_w'] * loss_gen_recon_c_a + \
+                         hyperparameters['recon_x_w'] * loss_gen_recon_x_b + \
+                         hyperparameters['recon_s_w'] * loss_gen_recon_s_b + \
+                         hyperparameters['recon_c_w'] * loss_gen_recon_c_b + \
+                         hyperparameters['recon_x_cyc_w'] * loss_gen_cycrecon_x_a + \
+                         hyperparameters['recon_x_cyc_w'] * loss_gen_cycrecon_x_b + \
+                         hyperparameters['vgg_w'] * loss_gen_vgg_a + \
+                         hyperparameters['vgg_w'] * loss_gen_vgg_b + \
+                         hyperparameters['gan_w'] * loss_gen_class_a + \
+                         hyperparameters['gan_w'] * loss_gen_class_b
 
-        return self.loss_gen_total, x_ab, x_ba
+        losses = torch.stack((loss_gen_recon_x_a,
+                              loss_gen_recon_x_b,
+                              loss_gen_recon_s_a,
+                              loss_gen_recon_s_b,
+                              loss_gen_recon_c_a,
+                              loss_gen_recon_c_b,
+                              loss_gen_cycrecon_x_a,
+                              loss_gen_cycrecon_x_b,
+                              loss_gen_adv_a,
+                              loss_gen_adv_b,
+                              loss_gen_vgg_a,
+                              loss_gen_vgg_b,
+                              loss_gen_class_a,
+                              loss_gen_class_b))
+        losses = losses.unsqueeze(0)
+
+        return loss_gen_total, losses, x_ab, x_ba
 
     def compute_vgg_loss(self, vgg, img, target):
         img_vgg = vgg_preprocess(img)
@@ -227,13 +243,19 @@ class MUNIT_model(nn.Module):
         x_ab = self.gen_b.decode(c_a, s_b)
         x_ba = self.gen_a.decode(c_b, s_a)
         # D loss
-        self.loss_dis_a, self.loss_class_a = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
-        self.loss_dis_b, self.loss_class_b = self.dis_b.calc_dis_loss(x_ab.detach(), x_b, label_b)
+        loss_dis_a, loss_class_a = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
+        loss_dis_b, loss_class_b = self.dis_b.calc_dis_loss(x_ab.detach(), x_b, label_b)
+        loss_dis_total = hyperparameters['gan_w'] * loss_dis_a + hyperparameters['gan_w'] * loss_dis_b + \
+                         hyperparameters['gan_w'] * loss_class_a + hyperparameters['gan_w'] * loss_class_b
 
-        self.loss_dis_total = hyperparameters['gan_w'] * self.loss_dis_a + hyperparameters['gan_w'] * self.loss_dis_b + \
-                              hyperparameters['gan_w'] * self.loss_class_a + hyperparameters['gan_w'] * self.loss_class_b
+        losses = torch.stack((loss_dis_a,
+                              loss_dis_b,
+                              loss_class_a,
+                              loss_class_b
+                              ))
+        losses = losses.unsqueeze(0)
 
-        return self.loss_dis_total, x_ab, x_ba
+        return loss_dis_total, losses, x_ab, x_ba
 
     def update_learning_rate(self):
         if self.dis_scheduler is not None:

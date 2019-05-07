@@ -95,7 +95,7 @@ def get_data_loader_folder(input_folder, batch_size, train, new_size=None,
     if label != 0:
         dataset = ImageLabelFolder(input_folder, transform=transform)
     else:
-        dataset = ImageFolder(input_folder, transform=transform)
+        dataset = ImageFolder(input_folder, transform=transform,shuffle=train)
     loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=train, drop_last=True, num_workers=num_workers)
     return loader
 
@@ -173,15 +173,15 @@ def write_html(filename, iterations, image_save_iterations, image_directory, all
 
 
 def write_loss(iterations, trainer, train_writer):
-    members = [attr for attr in dir(trainer.MUNIT_model_on_one_gpu)
-               if not callable(getattr(trainer.MUNIT_model_on_one_gpu, attr)) and not attr.startswith("__") and ('loss' in attr or 'grad' in attr or 'nwd' in attr)]
-    for m in members:
-        train_writer.add_scalar(m[5:8]+'/'+m, getattr(trainer.MUNIT_model_on_one_gpu, m), iterations + 1)
 
-    train_writer.add_histogram('c_a', trainer.MUNIT_model_on_one_gpu.c_b, iterations + 1)
-    train_writer.add_histogram('c_b', trainer.MUNIT_model_on_one_gpu.c_b, iterations + 1)
-    train_writer.add_histogram('s_a_prime', trainer.MUNIT_model_on_one_gpu.s_a_prime, iterations + 1)
-    train_writer.add_histogram('s_b_prime', trainer.MUNIT_model_on_one_gpu.s_b_prime, iterations + 1)
+    for i, loss in enumerate(trainer.gen_losses_names):
+        train_writer.add_scalar('gen/'+ loss, trainer.gen_losses[i], iterations + 1)
+    for i, loss in enumerate(trainer.dis_losses_names):
+        train_writer.add_scalar('dis/'+ loss, trainer.dis_losses[i], iterations + 1)
+    train_writer.add_scalar('loss_gen_total', trainer.loss_gen_total, iterations + 1)
+    train_writer.add_scalar('loss_dis_total', trainer.loss_dis_total, iterations + 1)
+
+
 
 
 def slerp(val, low, high):

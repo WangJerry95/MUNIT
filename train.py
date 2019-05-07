@@ -26,6 +26,8 @@ parser.add_argument('--trainer', type=str, default='MUNIT', help="MUNIT|UNIT")
 opts = parser.parse_args()
 cudnn.benchmark = True
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+
 
 # Load experiment setting
 config = get_config(opts.config)

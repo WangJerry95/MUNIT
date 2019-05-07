@@ -28,29 +28,46 @@ class MUNIT_Trainer():
         self.gen_opt, self.dis_opt, self.dis_scheduler, self.gen_scheduler = \
             self.MUNIT_model_on_one_gpu.create_optimizers(hyperparameters)
 
+        self.gen_losses_names = ['loss_gen_recon_x_a',
+                                 'loss_gen_recon_x_b',
+                                 'loss_gen_recon_s_a',
+                                 'loss_gen_recon_s_b',
+                                 'loss_gen_recon_c_a',
+                                 'loss_gen_recon_c_b',
+                                 'loss_gen_cycrecon_x_a',
+                                 'loss_gen_cycrecon_x_b',
+                                 'loss_gen_adv_a',
+                                 'loss_gen_adv_b']
+
+        self.dis_losses_names = ['loss_dis_a', 'loss_dis_b']
+
     def gen_update(self, x_a, x_b, hyperparameters, label_a=None, label_b=None):
         self.gen_opt.zero_grad()
         # forward and compute loss
-        losses_gen_total, x_ab, x_ba = \
+        losses_gen_total, self.gen_losses, x_ab, x_ba = \
             self.MUNIT_model(x_a, x_b, hyperparameters, mode='generator', label_a=label_a, label_b=label_b)
+        if self.gen_losses.dim() > 1:
+            self.gen_losses = self.gen_losses.mean(dim=0)
         if losses_gen_total.dim() > 0:
-            loss_gen_total = sum(losses_gen_total.values()).mean()
+            self.loss_gen_total = losses_gen_total.mean()
         else:
-            loss_gen_total = losses_gen_total
-        loss_gen_total.backward()
+            self.loss_gen_total = losses_gen_total
+        self.loss_gen_total.backward()
 
         self.gen_opt.step()
 
     def dis_update(self, x_a, x_b, hyperparameters, label_a=None, label_b=None,):
         self.dis_opt.zero_grad()
         # forward and compute loss
-        losses_dis_total, x_ab, x_ba = \
+        losses_dis_total, self.dis_losses, x_ab, x_ba = \
             self.MUNIT_model(x_a, x_b, hyperparameters, mode='discriminator', label_a=label_a, label_b=label_b)
+        if self.dis_losses.dim() > 1:
+            self.dis_losses = self.dis_losses.mean(dim=0)
         if losses_dis_total.dim() > 0:
-            loss_dis_total = sum(losses_dis_total.values()).mean()
+            self.loss_dis_total = losses_dis_total.mean()
         else:
-            loss_dis_total = losses_dis_total
-        loss_dis_total.backward()
+            self.loss_dis_total = losses_dis_total
+        self.loss_dis_total.backward()
 
         self.dis_opt.step()
 
