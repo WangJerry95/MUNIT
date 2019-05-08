@@ -25,7 +25,7 @@ class MUNIT_Trainer():
         self.MUNIT_model.to(device)
 
         # Setup the optimizers
-        self.gen_opt, self.dis_opt, self.dis_scheduler, self.gen_scheduler = \
+        self.dis_opt, self.gen_opt, self.dis_scheduler, self.gen_scheduler = \
             self.MUNIT_model_on_one_gpu.create_optimizers(hyperparameters)
 
         self.gen_losses_names = ['loss_gen_recon_x_a',
@@ -76,7 +76,6 @@ class MUNIT_Trainer():
             self.dis_scheduler.step()
         if self.gen_scheduler is not None:
             self.gen_scheduler.step()
-
 
 # class UNIT_Trainer(nn.Module):
 #     def __init__(self, hyperparameters):

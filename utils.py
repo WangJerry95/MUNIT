@@ -300,6 +300,14 @@ def weights_init(init_type='gaussian'):
     return init_fun
 
 
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+        torch.backends.cudnn.deterministic = True
+
+
 class Timer:
     def __init__(self, msg):
         self.msg = msg
