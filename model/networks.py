@@ -139,7 +139,7 @@ class AdaINGen(nn.Module):
             self.mlp = MLP(style_dim, self.get_num_smain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
             # Style decoder to generate SmaIN parameters
             output_dim = self.enc_content.output_dim
-            self.semantic_dec = SemanticDecoder(output_dim, output_dim//2, self.get_num_smain_params(self.dec), 3, 3,
+            self.semantic_dec = SemanticEncoder(output_dim, output_dim//2, self.get_num_smain_params(self.dec), 3, 3,
                                                 norm='in', activ='lrelu', conv_type='regular')
         elif self.conditional_norm == 'adain':
             self.mlp = MLP(style_dim, self.get_num_adain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
@@ -147,7 +147,7 @@ class AdaINGen(nn.Module):
     def forward(self, images):
         # reconstruct an image
         content, style_fake = self.encode(images)
-        images_recon = self.decode(content, style_fake)
+        images_recon = self.decode(images, content, style_fake)
         return images_recon
 
     def encode(self, images):
@@ -156,11 +156,11 @@ class AdaINGen(nn.Module):
         content = self.enc_content(images)
         return content, style_fake
 
-    def decode(self, content, style):
+    def decode(self, image, content, style):
         # decode content and style codes to an image
         if self.conditional_norm == 'smain':
             smain_params_bias = self.mlp(style)
-            smain_params_weight = self.semantic_dec(content)
+            smain_params_weight = self.semantic_enc(image)
             self.assign_smain_params([smain_params_weight, smain_params_bias], self.dec)
         elif self.conditional_norm == 'adain':
             adain_params = self.mlp(style)
@@ -302,12 +302,13 @@ class Decoder(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-class SemanticDecoder(nn.Module):
-    def __init__(self, input_dim, dim, output_dim, num_layer, k_size, norm='in', activ='lrelu',
+class SemanticEncoder(nn.Module):
+    def __init__(self, n_downsampling, input_dim, dim, output_dim, num_layer, k_size, norm='in', activ='lrelu',
                  pad_type='zero', conv_type='regular'):
-        super(SemanticDecoder, self).__init__()
+        super(SemanticEncoder, self).__init__()
         self.input_dim = input_dim
         self.model = []
+        self.n_downsampling = n_downsampling
         if conv_type == 'regular':
             self.model += [Conv2dBlock(input_dim, dim, k_size, 1, k_size // 2,
                                        norm=norm, activation=activ, pad_type=pad_type)]
@@ -337,6 +338,9 @@ class SemanticDecoder(nn.Module):
             self.model = nn.Sequential(*self.model)
 
     def forward(self, x):
+        size = x.size()[2:]
+        size = [i // pow(2,self.n_downsampling) for i in size]
+        x = F.interpolate(x, size=size, mode='nearest')
 
         return self.model(x)  # weight: (b, output_dim, w, h);
 

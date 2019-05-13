@@ -127,17 +127,17 @@ class MUNIT_model(nn.Module):
         c_a, s_a_prime = self.gen_a.encode(x_a)
         c_b, s_b_prime = self.gen_b.encode(x_b)
         # decode (within domain)
-        x_a_recon = self.gen_a.decode(c_a, s_a_prime)
-        x_b_recon = self.gen_b.decode(c_b, s_b_prime)
+        x_a_recon = self.gen_a.decode(x_a, c_a, s_a_prime)
+        x_b_recon = self.gen_b.decode(x_b, c_b, s_b_prime)
         # decode (cross domain)
-        x_ba = self.gen_a.decode(c_b, s_a)
-        x_ab = self.gen_b.decode(c_a, s_b)
+        x_ba = self.gen_a.decode(x_b, c_b, s_a)
+        x_ab = self.gen_b.decode(x_a, c_a, s_b)
         # encode again
         c_b_recon, s_a_recon = self.gen_a.encode(x_ba)
         c_a_recon, s_b_recon = self.gen_b.encode(x_ab)
         # decode again (if needed)
-        x_aba = self.gen_a.decode(c_a_recon, s_a_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
-        x_bab = self.gen_b.decode(c_b_recon, s_b_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
+        x_aba = self.gen_a.decode(x_a, c_a_recon, s_a_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
+        x_bab = self.gen_b.decode(x_b, c_b_recon, s_b_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
 
         # reconstruction loss
         loss_gen_recon_x_a = self.recon_criterion(x_a_recon, x_a)
@@ -242,8 +242,8 @@ class MUNIT_model(nn.Module):
         c_a, _ = self.gen_a.encode(x_a)
         c_b, _ = self.gen_b.encode(x_b)
         # decode (cross domain)
-        x_ab = self.gen_b.decode(c_a, s_b)
-        x_ba = self.gen_a.decode(c_b, s_a)
+        x_ab = self.gen_b.decode(x_a, c_a, s_b)
+        x_ba = self.gen_a.decode(x_b, c_b, s_a)
         # D loss
         loss_dis_a, loss_class_a = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
         loss_dis_b, loss_class_b = self.dis_b.calc_dis_loss(x_ab.detach(), x_b, label_b)
