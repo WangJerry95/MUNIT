@@ -126,13 +126,13 @@ class AdaINGen(nn.Module):
         activ = params['activ']
         pad_type = params['pad_type']
         mlp_dim = params['mlp_dim']
-
+        conditional_norm = params['conditional_norm']
         # style encoder
         self.enc_style = StyleEncoder(4, input_dim, dim, style_dim, norm='none', activ=activ, pad_type=pad_type)
 
         # content encoder
         self.enc_content = ContentEncoder(n_downsample, n_res, input_dim, dim, 'in', activ, pad_type=pad_type)
-        self.dec = Decoder(n_downsample, n_res, self.enc_content.output_dim, input_dim, res_norm='smain', activ=activ, pad_type=pad_type)
+        self.dec = Decoder(n_downsample, n_res, self.enc_content.output_dim, input_dim, res_norm=conditional_norm, activ=activ, pad_type=pad_type)
 
         # MLP to generate AdaIN parameters
         self.mlp = MLP(style_dim, self.get_num_smain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)

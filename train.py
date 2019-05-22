@@ -24,10 +24,11 @@ parser.add_argument('--config', type=str, default='configs/edges2handbags_folder
 parser.add_argument('--output_path', type=str, default='.', help="outputs path")
 parser.add_argument("--resume", action="store_true")
 parser.add_argument('--trainer', type=str, default='MUNIT', help="MUNIT|UNIT")
+parser.add_argument('--gpu', type=str, help='GPUs to be used')
 opts = parser.parse_args()
 cudnn.benchmark = True
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+os.environ["CUDA_VISIBLE_DEVICES"] = opts.gpu
 
 
 # Load experiment setting
@@ -61,7 +62,7 @@ checkpoint_directory, image_directory = prepare_sub_folder(output_directory)
 shutil.copy(opts.config, os.path.join(output_directory, 'config.yaml')) # copy config file to output folder
 
 # Start training
-iterations = trainer.resume(checkpoint_directory, hyperparameters=config) if opts.resume else 0
+iterations = trainer.MUNIT_model_on_one_gpu.resume(checkpoint_directory, hyperparameters=config) if opts.resume else 0
 while True:
     for it, (images_a, images_b) in enumerate(zip(train_loader_a, train_loader_b)):
         trainer.update_learning_rate()
