@@ -126,21 +126,23 @@ class AdaINGen(nn.Module):
         activ = params['activ']
         pad_type = params['pad_type']
         mlp_dim = params['mlp_dim']
-        conditional_norm = params['conditional_norm']
+        self.conditional_norm = params['conditional_norm']
         # style encoder
         self.enc_style = StyleEncoder(4, input_dim, dim, style_dim, norm='none', activ=activ, pad_type=pad_type)
 
         # content encoder
         self.enc_content = ContentEncoder(n_downsample, n_res, input_dim, dim, 'in', activ, pad_type=pad_type)
-        self.dec = Decoder(n_downsample, n_res, self.enc_content.output_dim, input_dim, res_norm=conditional_norm, activ=activ, pad_type=pad_type)
+        self.dec = Decoder(n_downsample, n_res, self.enc_content.output_dim, input_dim, res_norm=self.conditional_norm, activ=activ, pad_type=pad_type)
 
-        # MLP to generate AdaIN parameters
-        self.mlp = MLP(style_dim, self.get_num_smain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
-
-        # Style decoder to generate SmanIN parameters
-        output_dim = self.enc_content.output_dim
-        self.semantic_dec = SemanticDecoder(output_dim, output_dim//2, self.get_num_smain_params(self.dec), 3, 3,
-                                            norm='in', activ='lrelu', conv_type='regular')
+        if self.conditional_norm == 'smain':
+            # MLP to generate SmaIN parameters
+            self.mlp = MLP(style_dim, self.get_num_smain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
+            # Style decoder to generate SmaIN parameters
+            output_dim = self.enc_content.output_dim
+            self.semantic_dec = SemanticDecoder(output_dim, output_dim//2, self.get_num_smain_params(self.dec), 3, 3,
+                                                norm='in', activ='lrelu', conv_type='regular')
+        elif self.conditional_norm == 'adain':
+            self.mlp = MLP(style_dim, self.get_num_adain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
 
     def forward(self, images):
         # reconstruct an image
@@ -156,9 +158,14 @@ class AdaINGen(nn.Module):
 
     def decode(self, content, style):
         # decode content and style codes to an image
-        smain_params_bias = self.mlp(style)
-        smain_params_weight = self.semantic_dec(content)
-        self.assign_smain_params([smain_params_weight, smain_params_bias], self.dec)
+        if self.conditional_norm == 'smain':
+            smain_params_bias = self.mlp(style)
+            smain_params_weight = self.semantic_dec(content)
+            self.assign_smain_params([smain_params_weight, smain_params_bias], self.dec)
+        elif self.conditional_norm == 'adain':
+            adain_params = self.mlp(style)
+            self.assign_adain_params(adain_params, self.dec)
+
         images = self.dec(content)
         return images
 
