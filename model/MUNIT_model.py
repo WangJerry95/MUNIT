@@ -6,8 +6,10 @@ from model.networks import AdaINGen, MsImageDis, VAEGen
 from utils import weights_init, get_model_list, vgg_preprocess, load_vgg16, get_scheduler
 from torch.autograd import Variable
 import torch
+import torchvision.transforms as transforms
 import torch.nn as nn
 import os
+import random
 import numpy as np
 
 class MUNIT_model(nn.Module):
@@ -24,25 +26,26 @@ class MUNIT_model(nn.Module):
         self.b_attibute = hyperparameters['label_b']
 
         # fix the noise used in sampling
+        #TODO: It is assumed that style code of different domain are of different distribution, so it can not be drawed from the same distribution
         display_size = int(hyperparameters['display_size'])
-        if self.a_attibute == 0:
-            self.s_a = torch.randn(display_size, self.style_dim, 1, 1).cuda()
-        else:
-            self.s_a = torch.randn(display_size, self.style_dim - self.a_attibute, 1, 1).cuda()
-            s_attribute = [i%self.a_attibute for i in range(display_size)]
-            s_attribute = torch.tensor(s_attribute, dtype=torch.long).reshape((display_size, 1))
-            label_a = torch.zeros(display_size, self.a_attibute, dtype=torch.float32).scatter_(1, s_attribute, 1)
-            label_a = label_a.reshape(display_size, self.a_attibute, 1, 1).cuda()
-            self.s_a = torch.cat([self.s_a, label_a], 1)
-        if self.b_attibute == 0:
-            self.s_b = torch.randn(display_size, self.style_dim, 1, 1).cuda()
-        else:
-            self.s_b = torch.randn(display_size, self.style_dim - self.b_attibute, 1, 1).cuda()
-            s_attribute = [i%self.b_attibute for i in range(display_size)]
-            s_attribute = torch.tensor(s_attribute, dtype=torch.long).reshape((display_size, 1))
-            label_b = torch.zeros(display_size, self.b_attibute, dtype=torch.float32).scatter_(1, s_attribute, 1)
-            label_b = label_b.reshape(display_size, self.b_attibute, 1, 1).cuda()
-            self.s_b = torch.cat([self.s_b, label_b], 1)
+        # if self.a_attibute == 0:
+        #     self.s_a = torch.randn(display_size, self.style_dim, 1, 1).cuda()
+        # else:
+        #     self.s_a = torch.randn(display_size, self.style_dim - self.a_attibute, 1, 1).cuda()
+        #     s_attribute = [i%self.a_attibute for i in range(display_size)]
+        #     s_attribute = torch.tensor(s_attribute, dtype=torch.long).reshape((display_size, 1))
+        #     label_a = torch.zeros(display_size, self.a_attibute, dtype=torch.float32).scatter_(1, s_attribute, 1)
+        #     label_a = label_a.reshape(display_size, self.a_attibute, 1, 1).cuda()
+        #     self.s_a = torch.cat([self.s_a, label_a], 1)
+        # if self.b_attibute == 0:
+        #     self.s_b = torch.randn(display_size, self.style_dim, 1, 1).cuda()
+        # else:
+        #     self.s_b = torch.randn(display_size, self.style_dim - self.b_attibute, 1, 1).cuda()
+        #     s_attribute = [i%self.b_attibute for i in range(display_size)]
+        #     s_attribute = torch.tensor(s_attribute, dtype=torch.long).reshape((display_size, 1))
+        #     label_b = torch.zeros(display_size, self.b_attibute, dtype=torch.float32).scatter_(1, s_attribute, 1)
+        #     label_b = label_b.reshape(display_size, self.b_attibute, 1, 1).cuda()
+        #     self.s_b = torch.cat([self.s_b, label_b], 1)
 
         # Network weight initialization
         self.apply(weights_init(hyperparameters['init']))
@@ -78,57 +81,80 @@ class MUNIT_model(nn.Module):
     def forward(self, x_a, x_b, hyperparameters, mode='generator', label_a=None, label_b=None):
 
         if mode == 'generator':
-            total_losses, losses, x_ab, x_ba = self.compute_gen_loss(x_a, x_b, hyperparameters, label_a, label_b)
-            return losses, losses, x_ab, x_ba
+            # total_losses, losses, x_ab, x_ba, x_a_recon, x_b_recon
+            return self.compute_gen_loss(x_a, x_b, hyperparameters, label_a, label_b)
         if mode == 'discriminator':
-            total_losses, losses, x_ab, x_ba = self.compute_dis_loss(x_a, x_b, hyperparameters, label_a, label_b)
-            return total_losses, losses, x_ab, x_ba
-        if mode == 'sample':
-            self.eval()
-            s_a1 = Variable(self.s_a)
-            s_b1 = Variable(self.s_b)
-            s_a2 = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
-            s_b2 = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
-            x_a_recon, x_b_recon, x_ba1, x_ba2, x_ab1, x_ab2 = [], [], [], [], [], []
-            for i in range(x_a.size(0)):
-                c_a, s_a_fake = self.gen_a.encode(x_a[i].unsqueeze(0))
-                c_b, s_b_fake = self.gen_b.encode(x_b[i].unsqueeze(0))
-                x_a_recon.append(self.gen_a.decode(c_a, s_a_fake))
-                x_b_recon.append(self.gen_b.decode(c_b, s_b_fake))
-                x_ba1.append(self.gen_a.decode(c_b, s_a1[i].unsqueeze(0)))
-                x_ba2.append(self.gen_a.decode(c_b, s_a2[i].unsqueeze(0)))
-                x_ab1.append(self.gen_b.decode(c_a, s_b1[i].unsqueeze(0)))
-                x_ab2.append(self.gen_b.decode(c_a, s_b2[i].unsqueeze(0)))
-            x_a_recon, x_b_recon = torch.cat(x_a_recon), torch.cat(x_b_recon)
-            x_ba1, x_ba2 = torch.cat(x_ba1), torch.cat(x_ba2)
-            x_ab1, x_ab2 = torch.cat(x_ab1), torch.cat(x_ab2)
-            self.train()
-            return x_a, x_a_recon, x_ab1, x_ab2, x_b, x_b_recon, x_ba1, x_ba2
+            # total_losses, losses, x_ab, x_ba, x_a_recon, x_b_recon
+            return self.compute_dis_loss(x_a, x_b, hyperparameters, label_a, label_b)
+        # if mode == 'sample':
+        #     self.eval()
+        #     # s_a1 = Variable(self.s_a)
+        #     # s_b1 = Variable(self.s_b)
+        #     # s_a2 = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
+        #     # s_b2 = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
+        #     x_a_recon, x_b_recon, x_ba, x_ab = [], [], [], []
+        #     for i in range(x_a.size(0)):
+        #         c_a, s_a = self.gen_a.encode(x_a[i].unsqueeze(0))
+        #         c_b, s_b = self.gen_b.encode(x_b[i].unsqueeze(0))
+        #         x_a_recon.append(self.gen_a.decode(x_a, c_a, s_a))
+        #         x_b_recon.append(self.gen_b.decode(x_b, c_b, s_b))
+        #         x_ba.append(self.gen_a.decode(x_b, c_b, s_a))
+        #         x_ab.append(self.gen_b.decode(x_a, c_a, s_b))
+        #     x_a_recon, x_b_recon = torch.cat(x_a_recon), torch.cat(x_b_recon)
+        #     x_ba, x_ab = torch.cat(x_ba), torch.cat(x_ab)
+        #     self.train()
+        #     return x_a, x_a_recon, x_ab, x_b, x_b_recon, x_ba
 
     def compute_gen_loss(self, x_a, x_b, hyperparameters, label_a=None, label_b=None):
 
-        if label_a is None:
-            s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
-        else:
-            style_num = label_a.size(1)
-            s_a = Variable(torch.randn(x_a.size(0), self.style_dim - style_num, 1, 1).cuda())
-            label_a = label_a.repeat(x_a.size(0), 1)
-            label_a = label_a.reshape(x_a.size(0), style_num, 1, 1)
-            s_a = torch.cat([s_a, label_a], 1)
-        if label_b is None:
-            s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
-        else:
-            style_num = label_b.size(1)
-            s_b = Variable(torch.randn(x_b.size(0), self.style_dim-style_num, 1, 1).cuda())
-            label_b = label_b.repeat(x_b.size(0),1)
-            label_b = label_b.reshape(x_b.size(0), style_num, 1, 1)
-            s_b = torch.cat([s_b, label_b], 1)
+        # if label_a is None:
+        #     s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
+        # else:
+        #     style_num = label_a.size(1)
+        #     s_a = Variable(torch.randn(x_a.size(0), self.style_dim - style_num, 1, 1).cuda())
+        #     label_a = label_a.repeat(x_a.size(0), 1)
+        #     label_a = label_a.reshape(x_a.size(0), style_num, 1, 1)
+        #     s_a = torch.cat([s_a, label_a], 1)
+        # if label_b is None:
+        #     s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
+        # else:
+        #     style_num = label_b.size(1)
+        #     s_b = Variable(torch.randn(x_b.size(0), self.style_dim-style_num, 1, 1).cuda())
+        #     label_b = label_b.repeat(x_b.size(0),1)
+        #     label_b = label_b.reshape(x_b.size(0), style_num, 1, 1)
+        #     s_b = torch.cat([s_b, label_b], 1)
         # encode
-        c_a, s_a_prime = self.gen_a.encode(x_a)
-        c_b, s_b_prime = self.gen_b.encode(x_b)
+        c_a, s_a = self.gen_a.encode(x_a)
+        c_b, s_b = self.gen_b.encode(x_b)
         # decode (within domain)
-        x_a_recon = self.gen_a.decode(x_a, c_a, s_a_prime)
-        x_b_recon = self.gen_b.decode(x_b, c_b, s_b_prime)
+        #TODO: Add geometric transformation within domain
+        transform_list = ["transpose", "flip", "rotate","none"]
+        transform = random.choice(transform_list)
+        if transform == "transpose":
+            c_a_t = torch.transpose(c_a, dim0=2, dim1=3)
+            x_a_t = torch.transpose(x_a, dim0=2, dim1=3)
+            c_b_t = torch.transpose(c_b, dim0=2, dim1=3)
+            x_b_t = torch.transpose(x_b, dim0=2, dim1=3)
+        elif transform == "flip":
+            dim = random.choice([[2, ], [3, ]])
+            c_a_t = torch.flip(c_a, dim)
+            x_a_t = torch.flip(x_a, dim)
+            c_b_t = torch.flip(c_b, dim)
+            x_b_t = torch.flip(x_b, dim)
+        elif transform == "rotate":
+            k = random.choice([1, 2, 3])
+            c_a_t = torch.rot90(c_a, k, (2, 3))
+            x_a_t = torch.rot90(x_a, k, (2, 3))
+            c_b_t = torch.rot90(c_a, k, (2, 3))
+            x_b_t = torch.rot90(x_b, k, (2, 3))
+        else:
+            c_a_t = c_a
+            x_a_t = x_a
+            c_b_t = c_b
+            x_b_t = x_b
+
+        x_a_recon = self.gen_a.decode(x_a_t, c_a_t, s_a)
+        x_b_recon = self.gen_b.decode(x_b_t, c_b_t, s_b)
         # decode (cross domain)
         x_ba = self.gen_a.decode(x_b, c_b, s_a)
         x_ab = self.gen_b.decode(x_a, c_a, s_b)
@@ -136,12 +162,12 @@ class MUNIT_model(nn.Module):
         c_b_recon, s_a_recon = self.gen_a.encode(x_ba)
         c_a_recon, s_b_recon = self.gen_b.encode(x_ab)
         # decode again (if needed)
-        x_aba = self.gen_a.decode(x_a, c_a_recon, s_a_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
-        x_bab = self.gen_b.decode(x_b, c_b_recon, s_b_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
+        x_aba = self.gen_a.decode(x_a, c_a_recon, s_a) if hyperparameters['recon_x_cyc_w'] > 0 else None
+        x_bab = self.gen_b.decode(x_b, c_b_recon, s_b) if hyperparameters['recon_x_cyc_w'] > 0 else None
 
         # reconstruction loss
-        loss_gen_recon_x_a = self.recon_criterion(x_a_recon, x_a)
-        loss_gen_recon_x_b = self.recon_criterion(x_b_recon, x_b)
+        loss_gen_recon_x_a = self.recon_criterion(x_a_recon, x_a_t)
+        loss_gen_recon_x_b = self.recon_criterion(x_b_recon, x_b_t)
         loss_gen_recon_s_a = self.recon_criterion(s_a_recon, s_a)
         loss_gen_recon_s_b = self.recon_criterion(s_b_recon, s_b)
         loss_gen_recon_c_a = self.recon_criterion(c_a_recon, c_a)
@@ -186,7 +212,7 @@ class MUNIT_model(nn.Module):
                               loss_gen_class_b))
         losses = losses.unsqueeze(0)
 
-        return loss_gen_total, losses, x_ab, x_ba
+        return loss_gen_total, losses, x_ab, x_ba, x_a_recon, x_b_recon
 
     def compute_vgg_loss(self, vgg, img, target):
         img_vgg = vgg_preprocess(img)
@@ -197,67 +223,118 @@ class MUNIT_model(nn.Module):
 
     def sample(self, x_a, x_b):
         self.eval()
-        s_a1 = Variable(self.s_a)
-        s_b1 = Variable(self.s_b)
-        s_a2 = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
-        s_b2 = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
-        x_a_recon, x_b_recon, x_ba1, x_ba2, x_ba3, x_ab1, x_ab2, x_ab3 = [], [], [], [], [], [], [], []
+        #TODO: Style code should only be extracted from certain images, not drawed from prior distribution
+        x_a_t_l, x_a_recon, x_b_recon, x_b_t_l, x_ba, x_ab = [], [], [], [], [], []
         for i in range(x_a.size(0)):
-            c_a, s_a_fake = self.gen_a.encode(x_a[i].unsqueeze(0))
-            c_b, s_b_fake = self.gen_b.encode(x_b[i].unsqueeze(0))
-            x_a_recon.append(self.gen_a.decode(c_a, s_a_fake))
-            x_b_recon.append(self.gen_b.decode(c_b, s_b_fake))
-            x_ba1.append(self.gen_a.decode(c_b, s_a1[i].unsqueeze(0)))
-            x_ba2.append(self.gen_a.decode(c_b, s_a2[i].unsqueeze(0)))
-            x_ba3.append(self.gen_a.decode(c_b, s_a_fake))
-            x_ab1.append(self.gen_b.decode(c_a, s_b1[i].unsqueeze(0)))
-            x_ab2.append(self.gen_b.decode(c_a, s_b2[i].unsqueeze(0)))
-            x_ab3.append(self.gen_b.decode(c_a, s_b_fake))
+            c_a, s_a = self.gen_a.encode(x_a[i].unsqueeze(0))
+            c_b, s_b = self.gen_b.encode(x_b[i].unsqueeze(0))
+            transform_list = ["transpose", "flip", "rotate", "none"]
+            transform = random.choice(transform_list)
+            if transform == "transpose":
+                c_a_t = torch.transpose(c_a, dim0=2, dim1=3)
+                x_a_t = torch.transpose(x_a[i], dim0=2, dim1=3)
+                c_b_t = torch.transpose(c_b, dim0=2, dim1=3)
+                x_b_t = torch.transpose(x_b[i], dim0=2, dim1=3)
+            elif transform == "flip":
+                dim = random.choice([[2, ], [3, ]])
+                c_a_t = torch.flip(c_a, dim)
+                x_a_t = torch.flip(x_a[i], dim)
+                c_b_t = torch.flip(c_b, dim)
+                x_b_t = torch.flip(x_b[i], dim)
+            elif transform == "rotate":
+                k = random.choice([1, 2, 3])
+                c_a_t = torch.rot90(c_a, k, (2, 3))
+                x_a_t = torch.rot90(x_a[i], k, (2, 3))
+                c_b_t = torch.rot90(c_a, k, (2, 3))
+                x_b_t = torch.rot90(x_b[i], k, (2, 3))
+            else:
+                c_a_t = c_a
+                x_a_t = x_a
+                c_b_t = c_b
+                x_b_t = x_b
+            x_a_recon.append(self.gen_a.decode(x_a_t, c_a_t, s_a))
+            x_b_recon.append(self.gen_b.decode(x_b_t, c_b_t, s_b))
+            x_ba.append(self.gen_a.decode(x_b_t, c_b_t, s_a))
+            x_ab.append(self.gen_b.decode(x_a_t, c_a_t, s_b))
+            x_a_t_l.append(x_a_t), x_b_t_l.append(x_b_t)
         x_a_recon, x_b_recon = torch.cat(x_a_recon), torch.cat(x_b_recon)
-        x_ba1, x_ba2, x_ba3 = torch.cat(x_ba1), torch.cat(x_ba2), torch.cat(x_ba3)
-        x_ab1, x_ab2, x_ab3 = torch.cat(x_ab1), torch.cat(x_ab2), torch.cat(x_ab3)
+        x_ba, x_ab = torch.cat(x_ba), torch.cat(x_ab)
+        x_a_t, x_b_t = torch.cat(x_a_t_l), torch.cat(x_b_t_l)
         self.train()
-        return x_a, x_a_recon, x_ab1, x_ab2, x_ab3, x_b, x_b_recon, x_ba1, x_ba2, x_ba3
+        return x_a, x_a_t, x_a_recon, x_ba, x_b, x_b_t, x_b_recon,  x_ab
 
     def compute_dis_loss(self, x_a, x_b, hyperparameters, label_a=None, label_b=None,):
 
-        if label_a is None:
-            s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
-        else:# utilize label in the style code
-            style_num = label_a.size(1)
-            s_a = Variable(torch.randn(x_a.size(0), self.style_dim - style_num, 1, 1).cuda())
-            label_a = label_a.repeat(x_a.size(0), 1)
-            label_a = label_a.reshape(x_a.size(0), style_num, 1, 1)
-            s_a = torch.cat([s_a, label_a], 1)
-        if label_b is None:
-            s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
-        else:# utilize label in the style code
-            style_num = label_b.size(1)
-            s_b = Variable(torch.randn(x_b.size(0), self.style_dim-style_num, 1, 1).cuda())
-            label_b = label_b.repeat(x_b.size(0),1)
-            label_b = label_b.reshape(x_b.size(0), style_num, 1, 1)
-            s_b = torch.cat([s_b, label_b], 1)
+        # if label_a is None:
+        #     s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
+        # else:# utilize label in the style code
+        #     style_num = label_a.size(1)
+        #     s_a = Variable(torch.randn(x_a.size(0), self.style_dim - style_num, 1, 1).cuda())
+        #     label_a = label_a.repeat(x_a.size(0), 1)
+        #     label_a = label_a.reshape(x_a.size(0), style_num, 1, 1)
+        #     s_a = torch.cat([s_a, label_a], 1)
+        # if label_b is None:
+        #     s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
+        # else:# utilize label in the style code
+        #     style_num = label_b.size(1)
+        #     s_b = Variable(torch.randn(x_b.size(0), self.style_dim-style_num, 1, 1).cuda())
+        #     label_b = label_b.repeat(x_b.size(0),1)
+        #     label_b = label_b.reshape(x_b.size(0), style_num, 1, 1)
+        #     s_b = torch.cat([s_b, label_b], 1)
 
         # encode
-        c_a, _ = self.gen_a.encode(x_a)
-        c_b, _ = self.gen_b.encode(x_b)
+        c_a, s_a = self.gen_a.encode(x_a)
+        c_b, s_b = self.gen_b.encode(x_b)
+        #TODO:Add discriminator loss within domain transformation
+        transform_list = ["transpose", "flip", "rotate", "none"]
+        transform = random.choice(transform_list)
+        if transform == "transpose":
+            c_a_t = torch.transpose(c_a, dim0=2, dim1=3)
+            x_a_t = torch.transpose(x_a, dim0=2, dim1=3)
+            c_b_t = torch.transpose(c_b, dim0=2, dim1=3)
+            x_b_t = torch.transpose(x_b, dim0=2, dim1=3)
+        elif transform == "flip":
+            dim = random.choice([[2, ], [3, ]])
+            c_a_t = torch.flip(c_a, dim)
+            x_a_t = torch.flip(x_a, dim)
+            c_b_t = torch.flip(c_b, dim)
+            x_b_t = torch.flip(x_b, dim)
+        elif transform == "rotate":
+            k = random.choice([1, 2, 3])
+            c_a_t = torch.rot90(c_a, k, (2, 3))
+            x_a_t = torch.rot90(x_a, k, (2, 3))
+            c_b_t = torch.rot90(c_a, k, (2, 3))
+            x_b_t = torch.rot90(x_b, k, (2, 3))
+        else:
+            c_a_t = c_a
+            x_a_t = x_a
+            c_b_t = c_b
+            x_b_t = x_b
+        # decode(within domain)
+        x_a_recon = self.gen_a.decode(x_a_t, c_a_t, s_a)
+        x_b_recon = self.gen_b.decode(x_b_t, c_b_t, s_b)
         # decode (cross domain)
         x_ab = self.gen_b.decode(x_a, c_a, s_b)
         x_ba = self.gen_a.decode(x_b, c_b, s_a)
         # D loss
         loss_dis_a, loss_class_a = self.dis_a.calc_dis_loss(x_ba.detach(), x_a, label_a)
         loss_dis_b, loss_class_b = self.dis_b.calc_dis_loss(x_ab.detach(), x_b, label_b)
-        loss_dis_total = hyperparameters['gan_w'] * loss_dis_a + hyperparameters['gan_w'] * loss_dis_b + \
+        loss_dis_a_recon, loss_class_a_recon = self.dis_a.calc_dis_loss(x_a_recon.detach(), x_a, label_a)
+        loss_dis_b_recon, loss_class_b_recon = self.dis_a.calc_dis_loss(x_b_recon.detach(), x_b, label_b)
+
+        loss_dis_total = hyperparameters['gan_w'] * (loss_dis_a + loss_dis_a_recon +  loss_dis_b + loss_dis_b_recon) +\
                          hyperparameters['gan_w'] * loss_class_a + hyperparameters['gan_w'] * loss_class_b
 
         losses = torch.stack((loss_dis_a,
+                              loss_dis_a_recon,
                               loss_dis_b,
+                              loss_dis_b_recon,
                               loss_class_a,
                               loss_class_b
                               ))
         losses = losses.unsqueeze(0)
 
-        return loss_dis_total, losses, x_ab, x_ba
+        return loss_dis_total, losses, x_ab, x_ba, x_a_recon, x_b_recon
 
     def update_learning_rate(self):
         if self.dis_scheduler is not None:
