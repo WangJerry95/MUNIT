@@ -212,7 +212,7 @@ class MUNIT_model(nn.Module):
                               loss_gen_class_b))
         losses = losses.unsqueeze(0)
 
-        return loss_gen_total, losses, x_ab, x_ba, x_a_recon, x_b_recon
+        return loss_gen_total, losses  # , x_ab, x_ba, x_a_recon, x_b_recon
 
     def compute_vgg_loss(self, vgg, img, target):
         img_vgg = vgg_preprocess(img)
@@ -232,26 +232,26 @@ class MUNIT_model(nn.Module):
             transform = random.choice(transform_list)
             if transform == "transpose":
                 c_a_t = torch.transpose(c_a, dim0=2, dim1=3)
-                x_a_t = torch.transpose(x_a[i], dim0=2, dim1=3)
+                x_a_t = torch.transpose(x_a[i].unsqueeze(0), dim0=2, dim1=3)
                 c_b_t = torch.transpose(c_b, dim0=2, dim1=3)
-                x_b_t = torch.transpose(x_b[i], dim0=2, dim1=3)
+                x_b_t = torch.transpose(x_b[i].unsqueeze(0), dim0=2, dim1=3)
             elif transform == "flip":
                 dim = random.choice([[2, ], [3, ]])
                 c_a_t = torch.flip(c_a, dim)
-                x_a_t = torch.flip(x_a[i], dim)
+                x_a_t = torch.flip(x_a[i].unsqueeze(0), dim)
                 c_b_t = torch.flip(c_b, dim)
-                x_b_t = torch.flip(x_b[i], dim)
+                x_b_t = torch.flip(x_b[i].unsqueeze(0), dim)
             elif transform == "rotate":
                 k = random.choice([1, 2, 3])
                 c_a_t = torch.rot90(c_a, k, (2, 3))
-                x_a_t = torch.rot90(x_a[i], k, (2, 3))
+                x_a_t = torch.rot90(x_a[i].unsqueeze(0), k, (2, 3))
                 c_b_t = torch.rot90(c_a, k, (2, 3))
-                x_b_t = torch.rot90(x_b[i], k, (2, 3))
+                x_b_t = torch.rot90(x_b[i].unsqueeze(0), k, (2, 3))
             else:
                 c_a_t = c_a
-                x_a_t = x_a
+                x_a_t = x_a[i].unsqueeze(0)
                 c_b_t = c_b
-                x_b_t = x_b
+                x_b_t = x_b[i].unsqueeze(0)
             x_a_recon.append(self.gen_a.decode(x_a_t, c_a_t, s_a))
             x_b_recon.append(self.gen_b.decode(x_b_t, c_b_t, s_b))
             x_ba.append(self.gen_a.decode(x_b_t, c_b_t, s_a))
@@ -334,7 +334,7 @@ class MUNIT_model(nn.Module):
                               ))
         losses = losses.unsqueeze(0)
 
-        return loss_dis_total, losses, x_ab, x_ba, x_a_recon, x_b_recon
+        return loss_dis_total, losses  # x_ab, x_ba, x_a_recon, x_b_recon
 
     def update_learning_rate(self):
         if self.dis_scheduler is not None:
