@@ -144,11 +144,16 @@ class AdaINGen(nn.Module):
         elif self.conditional_norm == 'adain':
             self.mlp = MLP(style_dim, self.get_num_adain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
 
-    def forward(self, images):
+    def forward(self, images, mode='encode', content=None, style=None):
         # reconstruct an image
-        content, style_fake = self.encode(images)
-        images_recon = self.decode(images, content, style_fake)
-        return images_recon
+        if mode == 'encode':
+            content_fake, style_fake = self.encode(images)
+            return content_fake, style_fake
+        elif mode == 'decode':
+            images_recon = self.decode(images, content, style)
+            return images_recon
+        else:
+            raise ValueError("forward mode not supported!")
 
     def encode(self, images):
         # encode an image to its content and style codes

@@ -15,6 +15,11 @@ class MUNIT_Trainer():
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         # Initiate the networks
         self.MUNIT_model = MUNIT_model(hyperparameters)
+        self.MUNIT_model.to(device)
+        # Setup the optimizers
+        self.dis_opt, self.gen_opt, self.dis_scheduler, self.gen_scheduler = \
+            self.MUNIT_model.create_optimizers(hyperparameters)
+        #  use multiple F=GPUs
         if torch.cuda.device_count() > 1:
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
@@ -22,11 +27,7 @@ class MUNIT_Trainer():
             self.MUNIT_model_on_one_gpu = self.MUNIT_model.module
         else:
             self.MUNIT_model_on_one_gpu = self.MUNIT_model
-        self.MUNIT_model.to(device)
 
-        # Setup the optimizers
-        self.dis_opt, self.gen_opt, self.dis_scheduler, self.gen_scheduler = \
-            self.MUNIT_model_on_one_gpu.create_optimizers(hyperparameters)
 
         self.gen_losses_names = ['loss_gen_recon_x_a',
                                  'loss_gen_recon_x_b',

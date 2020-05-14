@@ -134,7 +134,8 @@ def prepare_sub_folder(output_directory):
     if not os.path.exists(checkpoint_directory):
         print("Creating directory: {}".format(checkpoint_directory))
         os.makedirs(checkpoint_directory)
-    return checkpoint_directory, image_directory
+    test_directory = os.path.join(output_directory, 'test')
+    return checkpoint_directory, image_directory, test_directory
 
 
 def write_one_row_html(html_file, iterations, img_filename, all_size):
