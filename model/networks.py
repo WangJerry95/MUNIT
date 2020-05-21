@@ -139,7 +139,7 @@ class AdaINGen(nn.Module):
             self.mlp = MLP(style_dim, self.get_num_smain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
             # Style decoder to generate SmaIN parameters
             output_dim = self.enc_content.output_dim
-            self.semantic_dec = SemanticEncoder(output_dim, output_dim//2, self.get_num_smain_params(self.dec), 3, 3,
+            self.semantic_enc = SemanticEncoder(n_downsample, 3, 64, self.get_num_smain_params(self.dec), 4, 3,
                                                 norm='in', activ='lrelu', conv_type='regular')
         elif self.conditional_norm == 'adain':
             self.mlp = MLP(style_dim, self.get_num_adain_params(self.dec), mlp_dim, 3, norm='none', activ=activ)
@@ -318,8 +318,9 @@ class SemanticEncoder(nn.Module):
             self.model += [Conv2dBlock(input_dim, dim, k_size, 1, k_size // 2,
                                        norm=norm, activation=activ, pad_type=pad_type)]
             for i in range(num_layer-2):
-                self.model += [Conv2dBlock(dim, dim, k_size, 1, k_size//2,
+                self.model += [Conv2dBlock(dim, dim*2, k_size, 1, k_size//2,
                                            norm=norm, activation=activ, pad_type=pad_type)]
+                dim = dim*2
             self.model += [Conv2dBlock(dim, output_dim, k_size, 1, k_size//2,
                                        norm=norm, activation=activ, pad_type=pad_type)]
             self.model = nn.Sequential(*self.model)
@@ -344,7 +345,7 @@ class SemanticEncoder(nn.Module):
 
     def forward(self, x):
         size = x.size()[2:]
-        size = [i // pow(2,self.n_downsampling) for i in size]
+        size = [i // pow(2, self.n_downsampling) for i in size]
         x = F.interpolate(x, size=size, mode='nearest')
 
         return self.model(x)  # weight: (b, output_dim, w, h);

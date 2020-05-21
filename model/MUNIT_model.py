@@ -261,7 +261,7 @@ class MUNIT_model(nn.Module):
         x_ba, x_ab = torch.cat(x_ba), torch.cat(x_ab)
         x_a_t, x_b_t = torch.cat(x_a_t_l), torch.cat(x_b_t_l)
         self.train()
-        return x_a, x_a_t, x_a_recon, x_ba, x_b, x_b_t, x_b_recon,  x_ab
+        return x_a, x_a_t, x_a_recon, x_ab, x_b, x_b_t, x_b_recon, x_ba
 
     def compute_dis_loss(self, x_a, x_b, hyperparameters, label_a=None, label_b=None,):
 
