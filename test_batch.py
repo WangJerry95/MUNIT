@@ -3,7 +3,8 @@ Copyright (C) 2018 NVIDIA Corporation.  All rights reserved.
 Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 """
 from __future__ import print_function
-from utils import get_config, prepare_sub_folder, get_data_loader_folder, pytorch03_to_pytorch04, load_inception
+from utils import get_config, prepare_sub_folder, get_data_loader_folder, \
+    pytorch03_to_pytorch04, load_inception, SSIM_PSNR_MSE
 from model.MUNIT_model import MUNIT_model
 from torch import nn
 from scipy.stats import entropy
@@ -35,6 +36,7 @@ parser.add_argument('--num_content',type=int, default=4, help="number of content
 parser.add_argument('--num_style',type=int, default=8, help="number of styles to sample in one batch")
 parser.add_argument('--output_path', type=str, default='.', help="path for logs, checkpoints, and VGG model weight")
 parser.add_argument('--trainer', type=str, default='MUNIT', help="MUNIT|UNIT")
+parser.add_argument('--metrics', action='store_true', default=False,help="whether to compute metrics or not")
 parser.add_argument('--compute_IS', action='store_true', help="whether to compute Inception Score or not")
 parser.add_argument('--compute_CIS', action='store_true', help="whether to compute Conditional Inception Score or not")
 parser.add_argument('--inception_a', type=str, default='.', help="path to the pretrained inception network for domain A")
@@ -66,8 +68,8 @@ if opts.compute_IS or opts.compute_IS:
 
 # Setup model and data loader
 # image_names = ImageFolder(opts.input_folder, transform=None, return_paths=True)
-data_content_loader = get_data_loader_folder(opts.input_content_folder, opts.num_content, True, new_size=config['new_size'], crop=True)
-data_style_loader = get_data_loader_folder(opts.input_style_folder, opts.num_style, True, new_size=config['new_size'], crop=True)
+data_content_loader = get_data_loader_folder(opts.input_content_folder, opts.num_content, opts.metrics, new_size=config['new_size'], crop=True)
+data_style_loader = get_data_loader_folder(opts.input_style_folder, opts.num_style, opts.metrics, new_size=config['new_size'], crop=True)
 
 config['vgg_model_path'] = opts.output_path
 if opts.trainer == 'MUNIT':
@@ -92,11 +94,11 @@ gen_a = nn.DataParallel(model.gen_a)
 gen_b = nn.DataParallel(model.gen_b)
 
 
-if opts.compute_IS:
-    IS = []
-    all_preds = []
-if opts.compute_CIS:
-    CIS = []
+if opts.metrics:
+    ssims = []
+    psnrs = []
+    mses = []
+    fids = []
 
 # if opts.trainer == 'MUNIT':
     # Start testing
@@ -113,6 +115,11 @@ for i, (content_images, style_images) in enumerate(zip(data_content_loader, data
         content_code = content_code.unsqueeze(0).repeat(opts.num_style, 1, 1, 1)
         content_image_tensor = content_image.unsqueeze(0).repeat(opts.num_style, 1, 1, 1)
         image_transfered = gen_a(content_image_tensor.cuda(), mode='decode', content=content_code, style=style_codes)
+        if opts.metrics:
+            ssim, psnr, mse, grad, full = SSIM_PSNR_MSE(image_transfered, style_images)
+            ssims.append(ssim)
+            psnrs.append(psnr)
+            mses.append(mse)
         image_transfered = torch.cat((content_image.unsqueeze(0), image_transfered.cpu()), dim=0)
         images_transfered.append(image_transfered)
     images_transfered = torch.cat(tuple(images_transfered), dim=0)
@@ -121,6 +128,10 @@ for i, (content_images, style_images) in enumerate(zip(data_content_loader, data
     image_grid = vutils.make_grid(display_images, nrow=opts.num_style+1, normalize=True, pad_value=1)
     vutils.save_image(image_grid, "%s/test_batch_%03d.jpg" % (test_directory, i))
     print("image saved at %s/test_batch_%03d.jpg" % (test_directory, i))
+mssim = np.mean(np.array(ssims))
+mpsnr = np.mean(np.array(psnrs))
+mmse = np.mean(np.array(mses))
+print("\nssim: %04f, psnr: %04f, mse: %04f" % (mssim, mpsnr, mmse))
     # for i, (images, names) in enumerate(zip(data_loader, image_names)):
     #     if opts.compute_CIS:
     #         cur_preds = []
@@ -165,23 +176,3 @@ for i, (content_images, style_images) in enumerate(zip(data_content_loader, data
     # if opts.compute_CIS:
     #     print("conditional Inception Score: {}".format(np.exp(np.mean(CIS))))
 #
-# elif opts.trainer == 'UNIT':
-#     # Start testing
-#     for i, (images, names) in enumerate(zip(data_loader, image_names)):
-#         print(names[1])
-#         images = Variable(images.cuda(), volatile=True)
-#         content, _ = encode(images)
-#
-#         outputs = decode(content)
-#         outputs = (outputs + 1) / 2.
-#         # path = os.path.join(opts.output_folder, 'input{:03d}_output{:03d}.jpg'.format(i, j))
-#         basename = os.path.basename(names[1])
-#         path = os.path.join(opts.output_folder,basename)
-#         if not os.path.exists(os.path.dirname(path)):
-#             os.makedirs(os.path.dirname(path))
-#         vutils.save_image(outputs.data, path, padding=0, normalize=True)
-#         if not opts.output_only:
-#             # also save input images
-#             vutils.save_image(images.data, os.path.join(opts.output_folder, 'input{:03d}.jpg'.format(i)), padding=0, normalize=True)
-# else:
-#     pass

@@ -8,6 +8,7 @@ from model.networks import Vgg16
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
 from torchvision import transforms
+import torchvision.models as models
 from data import ImageFilelist, ImageFolder, ImageLabelFolder
 import torch
 import torch.nn as nn
@@ -18,6 +19,8 @@ import yaml
 import numpy as np
 import torch.nn.init as init
 import time
+import cv2
+from skimage.measure import compare_ssim, compare_psnr, compare_mse
 # Methods
 # get_all_data_loaders      : primary data loader interface (load trainA, testA, trainB, testB)
 # get_data_loader_list      : list-based data loader
@@ -310,6 +313,38 @@ def setup_seed(seed):
         torch.cuda.manual_seed_all(seed)
         np.random.seed(seed)
         torch.backends.cudnn.deterministic = True
+
+def SSIM_PSNR_MSE(images, references, gradient=False, full=False):
+    if images.size() != references.size():
+        raise RuntimeError("images and reference should have same size")
+    ssims = []
+    grads = []
+    fulls = []
+    psnrs = []
+    mses = []
+    images = images.cpu()
+    references = references.cpu()
+    images = images.astype(np.float64)
+    references = references.astype(np.float64)
+    images = np.mean(images, axis=1, keepdims=False)
+    references = np.mean(references, axis=1, keepdims=False)
+    batch_num = images.shape[0]
+    for i in range(batch_num):
+        image = images[i]
+        reference = references[i]
+        ssim, grad, S = compare_ssim(image, reference, gradient, full)
+        psnr = compare_psnr(reference, image)
+        mse = compare_mse(image, reference)
+        ssims.append(ssim)
+        psnrs.append(psnr)
+        mses.append(mse)
+        grads.append(grad)
+        fulls.append(S)
+    mssim = np.mean(np.array(ssims))
+    mpsnr = np.mean(np.array(psnrs))
+    mmse = np.mean(np.array(mses))
+
+    return mssim, mpsnr, mmse, grads, fulls
 
 
 class Timer:
